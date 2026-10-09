@@ -149,7 +149,7 @@ G1_AMP_LINK_NAMES = (
     "left_wrist_yaw_link",
     "right_shoulder_roll_link",
     "right_elbow_link",
-    "right_wrist_yaw_link"
+    "right_wrist_yaw_link",
 )
 
 
@@ -187,3 +187,68 @@ def _g1_action_scale() -> dict[str, float]:
 
 
 G1_ACTION_SCALE = _g1_action_scale()
+
+
+MIMIC_G1_CFG = G1_CFG.replace(
+    actuators={
+        "mimic_motors": ImplicitActuatorCfg(
+            joint_names_expr=[".*"],
+            joint_effort_limit={
+                ".*_hip_pitch_joint|.*_hip_yaw_joint|waist_yaw_joint": 88.0,
+                ".*_hip_roll_joint|.*_knee_joint": 139.0,
+                ".*_ankle_.*|waist_[rp]itch_joint|waist_roll_joint": 50.0,
+                ".*_shoulder_.*|.*_elbow_joint|.*_wrist_roll_joint": 25.0,
+                ".*_wrist_pitch_joint|.*_wrist_yaw_joint": 5.0,
+            },
+            actuator_velocity_limit={
+                ".*_hip_pitch_joint|.*_hip_yaw_joint|waist_yaw_joint": 32.0,
+                ".*_hip_roll_joint|.*_knee_joint": 20.0,
+                ".*_ankle_.*|waist_[rp]itch_joint|waist_roll_joint": 37.0,
+                ".*_shoulder_.*|.*_elbow_joint": 37.0,
+                ".*_wrist_roll_joint": 37.0,
+                ".*_wrist_pitch_joint|.*_wrist_yaw_joint": 22.0,
+            },
+            stiffness={
+                ".*_hip_pitch_joint|.*_hip_yaw_joint|waist_yaw_joint": 40.2,
+                ".*_hip_roll_joint|.*_knee_joint": 99.1,
+                ".*_ankle_.*|waist_[rp]itch_joint|waist_roll_joint": 28.5,
+                ".*_shoulder_.*|.*_elbow_joint|.*_wrist_roll_joint": 14.3,
+                ".*_wrist_pitch_joint|.*_wrist_yaw_joint": 16.8,
+            },
+            damping={
+                ".*_hip_pitch_joint|.*_hip_yaw_joint|waist_yaw_joint": 2.6,
+                ".*_hip_roll_joint|.*_knee_joint": 6.3,
+                ".*_ankle_.*|waist_[rp]itch_joint|waist_roll_joint": 1.8,
+                ".*_shoulder_.*|.*_elbow_joint|.*_wrist_roll_joint": 0.9,
+                ".*_wrist_pitch_joint|.*_wrist_yaw_joint": 1.1,
+            },
+            armature=0.01,
+        ),
+    }
+)
+
+
+def _resolve_actuator_value(cfg, joint_name: str, attribute: str) -> float | None:
+    values = getattr(cfg, attribute, None)
+    if values is None:
+        return None
+    if not isinstance(values, dict):
+        return float(values)
+    for pattern, value in values.items():
+        if re.fullmatch(pattern, joint_name):
+            return float(value)
+    return None
+
+
+def _mimic_g1_action_scale() -> dict[str, float]:
+    scales = {}
+    cfg = MIMIC_G1_CFG.actuators["mimic_motors"]
+    for joint_name in G1_DOF_ORDER:
+        effort = _resolve_actuator_value(cfg, joint_name, "joint_effort_limit")
+        stiffness = _resolve_actuator_value(cfg, joint_name, "stiffness")
+        if effort and stiffness:
+            scales[joint_name] = 0.25 * effort / stiffness
+    return scales
+
+
+MIMIC_G1_ACTION_SCALE = _mimic_g1_action_scale()
