@@ -7,7 +7,7 @@ motion_data:
   root_quat_order: xyzw
   csv_fps: 120
   csv_paths:
-    - ../motion_tracking/DR02/dance1_subject2_from_g1_DR02.csv
+    - ../motion_tracking/dr02/dance1_subject2_from_g1_DR02.csv
   csv_joint_names:
     - waist_z_joint
     - waist_x_joint
