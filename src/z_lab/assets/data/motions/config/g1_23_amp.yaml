@@ -1,0 +1,52 @@
+motion_data:
+  robot_name: g1_23
+  root_state_columns:
+    - base_pos_xyz
+    - base_quat
+  root_link_name: pelvis
+  root_quat_order: xyzw
+  csv_fps: 120
+  csv_paths:
+    - ../amp/g1_23/recovery/fallAndGetUp1_subject1_frames409_1948_g1_23.csv
+    - ../amp/g1_23/walkandrun/arc_jog_left_loop_002__A029_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/arc_walk_left_loop_001__A029_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/idle_turn_270_001__A048_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/idle_turn_360_001__A047_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/jog_arc_cw_loop_004__A045_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/jog_backward_loop_002__A022_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/jog_backward_loop_003__A023_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/jog_forward_loop_003__A021_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/jog_forward_loop_003__A022_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/step_rotate_idle_000_002__A026_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/walk_arc_cw_loop_002__A046_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/walk_backward_loop_001__A022_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/walk_backward_loop_001__A024_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/walk_forward_loop_002__A022_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/walk_forward_loop_002__A024_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/walk_sideway_left_loop_002__A021_from_g1_g1_23.csv
+    - ../amp/g1_23/walkandrun/walk_sideway_right_loop_001__A022_from_g1_g1_23.csv
+
+  csv_joint_names:
+    - left_hip_pitch_joint
+    - left_hip_roll_joint
+    - left_hip_yaw_joint
+    - left_knee_joint
+    - left_ankle_pitch_joint
+    - left_ankle_roll_joint
+    - right_hip_pitch_joint
+    - right_hip_roll_joint
+    - right_hip_yaw_joint
+    - right_knee_joint
+    - right_ankle_pitch_joint
+    - right_ankle_roll_joint
+    - waist_yaw_joint
+    - left_shoulder_pitch_joint
+    - left_shoulder_roll_joint
+    - left_shoulder_yaw_joint
+    - left_elbow_joint
+    - left_wrist_roll_joint
+    - right_shoulder_pitch_joint
+    - right_shoulder_roll_joint
+    - right_shoulder_yaw_joint
+    - right_elbow_joint
+    - right_wrist_roll_joint

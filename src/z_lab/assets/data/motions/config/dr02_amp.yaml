@@ -1,0 +1,62 @@
+motion_data:
+  robot_name: dr02
+  root_state_columns:
+    - base_pos_xyz
+    - base_quat
+  root_link_name: base_link
+  root_quat_order: xyzw
+  csv_fps: 120
+  csv_paths:
+    - ../amp/DR02/recovery/fallAndGetUp1_subject1_frames409_1948_dr02.csv
+    - ../amp/DR02/walkandrun/01_01_stageii_DR02.csv
+    - ../amp/DR02/walkandrun/arc_jog_left_loop_002__A029_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/arc_walk_left_loop_001__A029_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/dance1_subject2_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/idle_turn_270_001__A048_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/idle_turn_360_001__A047_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/jog_arc_cw_loop_004__A045_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/jog_backward_loop_002__A022_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/jog_backward_loop_003__A023_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/jog_forward_loop_003__A021_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/jog_forward_loop_003__A022_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/step_rotate_idle_000_002__A026_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/walk_arc_cw_loop_002__A046_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/walk_backward_loop_001__A022_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/walk_backward_loop_001__A024_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/walk_forward_loop_002__A022_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/walk_forward_loop_002__A024_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/walk_sideway_left_loop_002__A021_from_g1_DR02.csv
+    - ../amp/DR02/walkandrun/walk_sideway_right_loop_001__A022_from_g1_DR02.csv
+
+  csv_joint_names:
+    - waist_z_joint
+    - waist_x_joint
+    - waist_y_joint
+    - left_shoulder_y_joint
+    - left_shoulder_x_joint
+    - left_shoulder_z_joint
+    - left_elbow_joint
+    - left_wrist_z_joint
+    - left_wrist_y_joint
+    - left_wrist_x_joint
+    - right_shoulder_y_joint
+    - right_shoulder_x_joint
+    - right_shoulder_z_joint
+    - right_elbow_joint
+    - right_wrist_z_joint
+    - right_wrist_y_joint
+    - right_wrist_x_joint
+    - neck_z_joint
+    - neck_y_joint
+    - left_hip_y_joint
+    - left_hip_x_joint
+    - left_hip_z_joint
+    - left_knee_joint
+    - left_ankle_y_joint
+    - left_ankle_x_joint
+    - right_hip_y_joint
+    - right_hip_x_joint
+    - right_hip_z_joint
+    - right_knee_joint
+    - right_ankle_y_joint
+    - right_ankle_x_joint
