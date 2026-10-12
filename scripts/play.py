@@ -13,6 +13,7 @@ import warp as wp
 
 wp.config.enable_backward = False
 
+import z_lab.tasks  # noqa: E402,F401
 from isaaclab_rl.entrypoints import run_play_cli  # noqa: E402
 
 

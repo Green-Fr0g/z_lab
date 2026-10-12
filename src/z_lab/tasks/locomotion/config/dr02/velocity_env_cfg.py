@@ -74,3 +74,9 @@ class DR02VelocityEnvCfg(LocomotionEnvCfg):
 
         self.scene.terrain.terrain_type = "plane"
         self.curriculum.terrain_levels = None
+
+        # Sensor links have zero authored mass and are excluded from mass
+        # randomization to avoid an infinite inertia ratio during initialization.
+        self.events.add_base_mass.params["asset_cfg"].body_names = [
+            "^(?!(?:d435_front_link|d435_head_link|d435_rear_link|imu_base_link|imu_head_link|lidar_link)$).*"
+        ]

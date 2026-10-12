@@ -12,13 +12,19 @@
 
 ## 安装
 
-先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后在项目根目录创建环境：
+先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 Git LFS，然后在项目根目录执行一键安装脚本：
 
 ```bash
-uv sync
+./z_lab.sh -i
 ```
 
-`pyproject.toml` 中的 `[tool.uv.sources]` 使用了相对于本项目的 Isaac Lab 源码路径。如果 Isaac Lab 目录位置发生变化，需要同步修改这些路径。
+该命令依次完成以下工作：
+
+1. 初始化 Git LFS 并执行 `git lfs pull`，拉取 USD、模型和其他大文件。
+2. 使用 Python 3.12 创建项目的 `.venv` 虚拟环境。
+3. 执行 `uv sync --extra rsl-rl`，安装项目和 Isaac Lab 依赖。
+
+`pyproject.toml` 中的 `[tool.uv.sources]` 使用了相对于本项目的 Isaac Lab 源码路径。如果 Isaac Lab 目录位置发生变化，需要同步修改这些路径。安装完成后不需要手动激活虚拟环境，脚本会通过 `uv run` 使用项目环境。
 
 项目会转发 Isaac Lab 提供的可选依赖，包括 Isaac Sim、物理后端、渲染、可视化、强化学习和开发工具等。根据使用场景选择相应的 extra，例如：
 
@@ -42,6 +48,21 @@ uv run isaaclab list_envs --show_presets
 ```
 
 将 `<任务名称>` 替换为上面列出的任务 ID：
+
+也可以使用项目入口脚本。训练默认使用 `rsl_rl`，脚本会自动传递 `--rl_library rsl_rl`；如需使用其他强化学习库，可以在命令中显式传入 `--rl_library`。训练和播放参数遵循 Isaac Lab 3.0 接口，不再使用旧版的 `--headless` 参数：
+
+```bash
+# 列出已注册任务
+./z_lab.sh -l
+
+# 使用 rsl_rl 训练
+./z_lab.sh -t --task ZLab-Velocity-Unitree-G1
+
+# 播放策略
+./z_lab.sh -p --task ZLab-Velocity-Unitree-G1 --checkpoint <检查点路径>
+```
+
+`-l`、`-t` 和 `-p` 后面的参数会传递给 Isaac Lab 3.0 对应入口。使用 `./z_lab.sh --help` 查看脚本帮助。
 
 ```bash
 # 使用零动作运行
@@ -99,6 +120,19 @@ robot_usd_path = Z_LAB_ASSETS_DIR / "models" / "g1" / "g1_29dof_rev_1_0.usd"
 ```
 
 需要传入字符串的配置字段应使用 `str(robot_usd_path)`。项目的 `.gitattributes` 已为 USD 等大文件配置 Git LFS；添加大型二进制资产前请先安装 Git LFS。
+
+### USD 和 Git LFS 说明
+
+G1 29DOF 和 G1 23DOF 的顶层 USD 是 USD 组合层，文件本身很小，通过组合关系引用 `configuration` 目录中的 base、physics 和 sensor 层。只要 Git LFS 资源已完整拉取，两个模型可以正常打开，顶层文件较小不代表模型不完整。
+
+DR02 的主体、关节、物理和碰撞层可以正常加载。原始 `DR02-pro_base.usd` 中 6 个传感器连杆的视觉引用指向不存在的几何模型，现已清除这些失效视觉引用；`d435_front_link`、`d435_head_link`、`d435_rear_link`、`imu_base_link`、`imu_head_link` 和 `lidar_link` 连杆及其传感器/碰撞结构仍然保留。若远程仓库中看到 USD 文件只有 `version`、`oid` 和 `size` 三行，这是 Git LFS 指针文件，应在项目根目录执行：
+
+```bash
+git lfs install
+git lfs pull
+```
+
+之后再运行 `./z_lab.sh -i` 同步 Python 环境。
 
 ## 开发与检查
 
