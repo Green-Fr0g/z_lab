@@ -12,7 +12,7 @@ outputs/
 videos/
 wandb/
 
-.vscode/settings.json
-.vscode/launch.json
+
+.vscode/
 
 pyrightconfig.json
