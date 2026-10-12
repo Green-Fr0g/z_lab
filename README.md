@@ -1,135 +1,130 @@
 # z_lab
 
-An installable downstream Isaac Lab task package with a standard uv `src` layout.
+这是一个基于 Isaac Lab 3.0 的下游任务包，使用标准的 uv `src` 项目布局。
 
-The registered tasks are:
-- `ZLab-Locomotion-Cartpole`
+当前注册了三个基于管理器的速度跟踪 locomotion 任务：
 
-## Installation
+- `ZLab-Velocity-Unitree-G1`：Unitree G1，29 个策略自由度。
+- `ZLab-Velocity-Unitree-G1-23DOF`：Unitree G1，23 个策略自由度。
+- `ZLab-Velocity-DR02`：DR02，29 个策略自由度。
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then create the project environment. The default
-environment uses the Newton backend and does not install Isaac Sim:
+机器人资产使用 Isaac Lab 的隐式关节执行器。每个机器人的关节顺序、动作缩放、连杆名称、执行器参数和 USD 路径保存在 `src/z_lab/assets/robots` 中。
+
+## 安装
+
+先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后在项目根目录创建环境：
 
 ```bash
 uv sync
 ```
 
-This project's `pyproject.toml` uses editable relative paths to an Isaac Lab source checkout. Update
-`[tool.uv.sources]` if either directory moves.
+`pyproject.toml` 中的 `[tool.uv.sources]` 使用了相对于本项目的 Isaac Lab 源码路径。如果 Isaac Lab 目录位置发生变化，需要同步修改这些路径。
 
-The project forwards every optional extra declared by the Isaac Lab package used to create it, including physics,
-rendering, visualizer, RL, teleoperation, and development features. Inspect `pyproject.toml` for the complete list and
-pass each required extra to `uv run`:
+项目会转发 Isaac Lab 提供的可选依赖，包括 Isaac Sim、物理后端、渲染、可视化、强化学习和开发工具等。根据使用场景选择相应的 extra，例如：
 
 ```bash
-# Standalone OV PhysX
-uv run --extra ovphysx isaaclab random_agent --task <TASK_NAME> physics=ovphysx
+# 使用 OV PhysX
+uv run --extra ovphysx isaaclab random_agent --task <任务名称> physics=ovphysx
 
-# Isaac Sim with PhysX and RTX rendering
-uv run --extra isaacsim isaaclab random_agent --task <TASK_NAME> physics=isaacsim_physx
+# 使用 Isaac Sim PhysX 和 RTX 渲染
+uv run --extra isaacsim isaaclab random_agent --task <任务名称> physics=isaacsim_physx
 
-# Isaac Sim with the Rerun visualizer
-uv run --extra isaacsim --extra rerun isaaclab random_agent --task <TASK_NAME> --viz rerun
+# 使用 Isaac Sim 和 Rerun 可视化
+uv run --extra isaacsim --extra rerun isaaclab random_agent --task <任务名称> --viz rerun
 ```
 
-The `all` extra forwards Isaac Lab's `all` selection. The `ov` extra installs both the `ovphysx` and `ovrtx` runtimes;
-you can also select either independently. Commit `pyproject.toml` and `uv.lock` so collaborators use the same
-environment.
+## 运行任务
 
-## Run the tasks
-
-Replace the placeholders below with a task listed above and a selected RL library.
+当前三个任务的 agent 配置均使用 RSL-RL。可以先查看已经注册的环境：
 
 ```bash
-# List this project's environments and their available presets
 uv run isaaclab list_envs --show_presets
-
-# Exercise an environment without a trained policy
-uv run isaaclab zero_agent --task <TASK_NAME> --num_envs 16
-uv run isaaclab random_agent --task <TASK_NAME> --num_envs 16
-
-# Train and play
-uv run isaaclab train --rl_library <RL_LIBRARY> --task <TASK_NAME>
-uv run isaaclab play --rl_library <RL_LIBRARY> --task <TASK_NAME> --checkpoint latest
-
-# Distributed training
-uv run isaaclab train_multigpu --rl_library <RL_LIBRARY> --task <TASK_NAME> --num_gpus 2
-
-# Benchmark startup, runtime, training, or play
-uv run isaaclab benchmark runtime --task <TASK_NAME> --num_envs 16 --num_steps 1000
-uv run isaaclab benchmark training --rl_library <RL_LIBRARY> --task <TASK_NAME> --max_iterations 10
 ```
 
-Use `physics=<PRESET>` to select one of the presets shown by `isaaclab list_envs`.
+将 `<任务名称>` 替换为上面列出的任务 ID：
 
-## Project structure
+```bash
+# 使用零动作运行
+uv run isaaclab zero_agent --task <任务名称> --num_envs 16
 
-Task families live in `src/z_lab/tasks`. Within a manager-based family, task-wide MDP terms live in `mdp`, while
-robot-specific scenes, registrations, and agent configurations live in `config/cartpole`. Add another robot by
-creating a sibling of `config/cartpole`; add another task by creating a sibling task-family directory.
+# 使用随机动作运行
+uv run isaaclab random_agent --task <任务名称> --num_envs 16
 
-## Project assets
+# 训练
+uv run isaaclab train --rl_library rsl_rl --task <任务名称>
 
-Keep project-owned USD files and related data under `src/z_lab/assets/data`. The asset module exposes a
-stable path that works from an editable checkout and an installed wheel:
+# 加载最新检查点进行测试
+uv run isaaclab play --rl_library rsl_rl --task <任务名称> --checkpoint latest
+
+# 多 GPU 训练
+uv run isaaclab train_multigpu --rl_library rsl_rl --task <任务名称> --num_gpus 2
+
+# 运行基准测试
+uv run isaaclab benchmark runtime --task <任务名称> --num_envs 16 --num_steps 1000
+uv run isaaclab benchmark training --rl_library rsl_rl --task <任务名称> --max_iterations 10
+```
+
+可以使用 `physics=<预设名称>` 选择 `isaaclab list_envs --show_presets` 输出的物理后端预设。
+
+## 项目结构
+
+任务代码位于 `src/z_lab/tasks`。locomotion 任务的公共环境配置在 `locomotion_env_cfg.py` 中，公共 MDP 项位于 `mdp` 目录。三个机器人分别拥有独立的环境注册、机器人场景和 RSL-RL 配置：
+
+```text
+src/z_lab/
+├── assets/
+│   ├── data/
+│   │   ├── models/{g1,g1_23,dr02}/*.usd
+│   │   └── motions/config/*.yaml
+│   └── robots/{g1.py,g1_23.py,dr02.py}
+└── tasks/locomotion/
+    ├── locomotion_env_cfg.py
+    ├── mdp/
+    └── config/
+        ├── g1/
+        ├── g1_23dof/
+        └── dr02/
+```
+
+新增机器人时，在 `assets/robots` 增加对应的资产配置，并在 `tasks/locomotion/config` 下增加独立的机器人配置包。机器人自己的关节名称、动作顺序和奖励权重应在该机器人的配置范围内设置；公共 locomotion 配置只保存通用环境逻辑。
+
+## 项目资产
+
+项目自有的 USD、动作数据和其他资源统一放在 `src/z_lab/assets/data` 下。资产模块提供了一个在 editable checkout 和安装后的 wheel 中都有效的路径：
 
 ```python
 from z_lab.assets import Z_LAB_ASSETS_DIR
 
-robot_usd_path = Z_LAB_ASSETS_DIR / "robots" / "my_robot.usd"
+robot_usd_path = Z_LAB_ASSETS_DIR / "models" / "g1" / "g1_29dof_rev_1_0.usd"
 ```
 
-Keep asset configuration in the `z_lab.assets` package and pass `str(robot_usd_path)` to configuration fields that
-expect a string. USD files are configured for Git LFS by the project's `.gitattributes`; install Git LFS before adding
-large binary assets.
+需要传入字符串的配置字段应使用 `str(robot_usd_path)`。项目的 `.gitattributes` 已为 USD 等大文件配置 Git LFS；添加大型二进制资产前请先安装 Git LFS。
 
-## Development
+## 开发与检查
 
-Run the registration test and code-quality checks through the project environment:
+运行注册测试和代码质量检查：
 
 ```bash
 uv run pytest
 uv run pre-commit run --all-files
 ```
 
-The test helpers under `source/isaaclab_tasks/test` in the Isaac Lab repository are not part of the installed
-`isaaclab_tasks` package. Keep test fixtures in this project and use public Isaac Lab APIs. If you copy
-`env_test_utils.py`, it becomes vendored code whose upstream changes you must track.
-
-To configure VS Code or Cursor, run the `setup_python_env` task or invoke its command directly:
+项目中的 `pyrightconfig.json` 已包含项目 `src` 目录和 Isaac Lab 源码目录，VS Code/Pylance 或 Cursor/basedpyright 可以直接跳转到上游实现。需要配置编辑器环境时运行：
 
 ```bash
 uv run isaaclab --editor
 ```
 
-The project includes a `pyrightconfig.json` with the project `src` root and the Isaac Lab source packages under
-`../IsaacLab/source`, so Pylance can jump directly to upstream implementations. The setup command selects the active
-interpreter and can add Isaac Sim extension paths when needed. This supports both Pylance in VS Code and basedpyright in
-Cursor.
-
-In VS Code, use Pylance and select the interpreter that ran the setup command. In Cursor, install the
-[basedpyright extension](https://marketplace.visualstudio.com/items?itemName=detachhead.basedpyright) instead of
-Pylance, select the same interpreter, and reload the window. Both language servers read `pyrightconfig.json`.
-
-When using the `isaacsim` extra, include it while generating the editor configuration so the command can discover the
-Isaac Sim installation:
+如果使用 Isaac Sim extra，配置编辑器时也需要带上对应 extra：
 
 ```bash
 uv run --extra isaacsim isaaclab --editor
 ```
 
-For an Isaac Sim binaries installation that is not available in the project environment, provide its path explicitly:
+如果 Isaac Sim 是独立安装而不在项目环境中，可以显式指定路径：
 
 ```bash
-# Linux
-uv run isaaclab --editor --isaac_path <isaac-sim-path>
-
-# Windows
-uv run isaaclab --editor --isaac_path <isaac-sim-path>
+uv run isaaclab --editor --isaac_path <isaac-sim路径>
 ```
 
-## Troubleshooting
-
-If Pylance or basedpyright cannot resolve modules, confirm that the selected interpreter matches the one used to run the
-setup command, then reload the editor window. To add a missing extension or reduce indexing memory, edit the `extraPaths`
-array in the root `pyrightconfig.json`; remove simulator extension directories that the project does not use.
+如果编辑器无法解析模块，请确认编辑器选择的 Python 解释器与执行 setup 命令时使用的解释器一致，然后重新加载窗口。
