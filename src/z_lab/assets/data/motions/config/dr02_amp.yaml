@@ -5,7 +5,7 @@ motion_data:
     - base_quat
   root_link_name: base_link
   root_quat_order: xyzw
-  csv_fps: 120
+  csv_fps: 30
   csv_paths:
     - ../amp/dr02/recovery/fallAndGetUp1_subject1_frames409_1948_dr02.csv
     - ../amp/dr02/walkandrun/01_01_stageii_DR02.csv
