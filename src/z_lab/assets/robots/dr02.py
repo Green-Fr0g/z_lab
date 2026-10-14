@@ -38,11 +38,11 @@ DR02_CFG = ArticulationCfg(
         ),
         articulation_props=[
             PhysxArticulationCfg(
-                enabled_self_collisions=False,
+                enabled_self_collisions=True,
                 solver_position_iteration_count=8,
                 solver_velocity_iteration_count=2,
             ),
-            NewtonArticulationCfg(self_collision_enabled=False),
+            NewtonArticulationCfg(self_collision_enabled=True),
         ],
     ),
     init_state=ArticulationCfg.InitialStateCfg(

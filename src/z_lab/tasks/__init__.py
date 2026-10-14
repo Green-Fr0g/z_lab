@@ -3,7 +3,13 @@
 
 """Task registrations for the project."""
 
+# These imports intentionally run after ``import_packages`` to register tasks.
+# ruff: noqa: E402
+
 from isaaclab_tasks.utils import import_packages
 
 import_packages(__name__, ["utils", ".mdp"])
-from . import locomotion  # noqa: F401,E402
+from . import (
+    locomotion,
+    mimic,
+)  # noqa: E402,F401

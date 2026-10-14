@@ -1,0 +1,78 @@
+"""G1 29-DOF motion-mimic environment configuration."""
+
+from pathlib import Path
+
+from isaaclab.utils import configclass
+
+from z_lab.assets.robots.g1 import (
+    G1_ANCHOR_LINK_NAME,
+    G1_DOF_ORDER,
+    MIMIC_G1_ACTION_SCALE,
+    MIMIC_G1_CFG,
+)
+from z_lab.tasks.mimic.tracking_env_cfg import TrackingEnvCfg
+
+MOTION_FILE = Path(__file__).resolve().parent / "motions" / "dance.npz"
+
+
+@configclass
+class G1MimicEnvCfg(TrackingEnvCfg):
+    """Flat G1 motion-mimic task."""
+
+    anchor_body_name = G1_ANCHOR_LINK_NAME
+    body_names = [
+        "pelvis",
+        "left_hip_roll_link",
+        "left_knee_link",
+        "left_ankle_roll_link",
+        "right_hip_roll_link",
+        "right_knee_link",
+        "right_ankle_roll_link",
+        "torso_link",
+        "left_shoulder_roll_link",
+        "left_elbow_link",
+        "left_wrist_yaw_link",
+        "right_shoulder_roll_link",
+        "right_elbow_link",
+        "right_wrist_yaw_link",
+    ]
+    limb_end_body_names = [
+        "left_ankle_roll_link",
+        "right_ankle_roll_link",
+        "left_wrist_yaw_link",
+        "right_wrist_yaw_link",
+    ]
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.robot = MIMIC_G1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.actions.joint_pos.joint_names = list(G1_DOF_ORDER)
+        self.actions.joint_pos.scale = MIMIC_G1_ACTION_SCALE
+        self.commands.motion.motion_file = str(MOTION_FILE)
+        self.commands.motion.anchor_body_name = self.anchor_body_name
+        self.commands.motion.body_names = self.body_names
+
+        self.rewards.motion_global_anchor_pos.weight = 0.5
+        self.rewards.motion_global_anchor_ori.weight = 0.5
+        self.rewards.motion_body_pos.weight = 1.0
+        self.rewards.motion_body_ori.weight = 1.0
+        self.rewards.motion_body_lin_vel.weight = 1.0
+        self.rewards.motion_body_ang_vel.weight = 1.0
+        self.rewards.action_rate_l2.weight = -0.1
+        self.rewards.joint_limit.weight = -10.0
+        self.rewards.undesired_contacts.weight = -0.1
+
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
+            r"^(?!.*ankle_roll_link$)(?!.*wrist_yaw_link$).+$"
+        ]
+        self.terminations.ee_body_pos.params["body_names"] = self.limb_end_body_names
+
+
+@configclass
+class G1MimicWoStateEstimationEnvCfg(G1MimicEnvCfg):
+    """G1 mimic task without selected state-estimation observations."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.observations.policy.motion_anchor_pos_b = None
+        self.observations.policy.base_lin_vel = None

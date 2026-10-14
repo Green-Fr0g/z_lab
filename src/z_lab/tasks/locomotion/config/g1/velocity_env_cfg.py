@@ -44,9 +44,9 @@ class UnitreeG1VelocityEnvCfg(LocomotionEnvCfg):
         self.rewards.joint_acc.weight = -2.5e-7
         self.rewards.action_rate.weight = -0.05
         self.rewards.dof_pos_limits.weight = -5.0
-        self.rewards.joint_deviation_arms.weight = -0.1
+        self.rewards.joint_deviation_arms.weight = -0.15
         self.rewards.joint_deviation_waists.weight = -1.0
-        self.rewards.joint_deviation_legs.weight = -1.0
+        self.rewards.joint_deviation_legs.weight = -0.8
 
         #feet related
         self.rewards.gait.weight = 0.5

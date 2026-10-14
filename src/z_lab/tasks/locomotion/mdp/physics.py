@@ -34,7 +34,6 @@ class FlatPhysicsCfg(PresetCfg):
             update_data_interval=2,
             integrator="implicitfast",
             impratio=1.0,
-            use_mujoco_contacts=False,
         ),
         num_substeps=1,
         debug_mode=False,
