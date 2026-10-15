@@ -5,9 +5,9 @@ motion_data:
     - base_quat
   root_link_name: pelvis
   root_quat_order: xyzw
-  csv_fps: 30
+  csv_fps: 120
   csv_paths:
-    - ../amp/g1_23/recovery/fallAndGetUp1_subject1_frames409_1948_g1_23.csv
+    - ../amp/g1_23/recovery/fallAndGetUp1_subject1_frames409_1948.csv
     - ../amp/g1_23/walkandrun/arc_jog_left_loop_002__A029_from_g1_g1_23.csv
     - ../amp/g1_23/walkandrun/arc_walk_left_loop_001__A029_from_g1_g1_23.csv
     - ../amp/g1_23/walkandrun/idle_turn_270_001__A048_from_g1_g1_23.csv

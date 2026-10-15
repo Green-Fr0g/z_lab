@@ -5,13 +5,11 @@ motion_data:
     - base_quat
   root_link_name: base_link
   root_quat_order: xyzw
-  csv_fps: 30
+  csv_fps: 120
   csv_paths:
-    - ../amp/dr02/recovery/fallAndGetUp1_subject1_frames409_1948_dr02.csv
-    - ../amp/dr02/walkandrun/01_01_stageii_DR02.csv
+    - ../amp/dr02/recovery/fallAndGetUp1_subject1_frames409_1948.csv
     - ../amp/dr02/walkandrun/arc_jog_left_loop_002__A029_from_g1_DR02.csv
     - ../amp/dr02/walkandrun/arc_walk_left_loop_001__A029_from_g1_DR02.csv
-    - ../amp/dr02/walkandrun/dance1_subject2_from_g1_DR02.csv
     - ../amp/dr02/walkandrun/idle_turn_270_001__A048_from_g1_DR02.csv
     - ../amp/dr02/walkandrun/idle_turn_360_001__A047_from_g1_DR02.csv
     - ../amp/dr02/walkandrun/jog_arc_cw_loop_004__A045_from_g1_DR02.csv
