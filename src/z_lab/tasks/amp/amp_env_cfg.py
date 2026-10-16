@@ -321,7 +321,7 @@ class EventsCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names=()),
             "force_start": 0.0,
             "force_end": 0.0,
-            "anneal_iterations": 20000,
+            "anneal_steps": 50000,
         },
     )
     randomize_rigid_body_material = EventTerm(

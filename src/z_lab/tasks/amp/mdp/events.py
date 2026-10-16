@@ -20,6 +20,29 @@ if TYPE_CHECKING:
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot", joint_names=".*")
 
 
+def _reset_amp_expert_history(env: ManagerBasedRLEnv, env_ids: torch.Tensor) -> None:
+    """Reset only the motion-dependent AMP expert history for selected environments.
+
+    Isaac Lab's public ``ObservationManager.reset`` resets every observation
+    group. Motion clip changes only invalidate ``amp_expert`` history, while
+    policy, critic, and ``amp_policy`` observations remain continuous.
+    """
+    manager = env.observation_manager
+    group_name = "amp_expert"
+    if group_name not in manager._group_obs_term_names:
+        return
+
+    for term_cfg in manager._group_obs_class_term_cfgs.get(group_name, ()):
+        term_cfg.func.reset(env_ids=env_ids)
+    for term_name in manager._group_obs_term_names[group_name]:
+        delay_buffer = manager._group_obs_term_delay_buffer[group_name].get(term_name)
+        if delay_buffer is not None:
+            delay_buffer.reset(env_ids)
+        history_buffer = manager._group_obs_term_history_buffer[group_name].get(term_name)
+        if history_buffer is not None:
+            history_buffer.reset(batch_ids=env_ids)
+
+
 def init_motion_loader(
     env: ManagerBasedRLEnv,
     env_ids: torch.Tensor | None,
@@ -73,7 +96,7 @@ def advance_motion_reference(env: ManagerBasedRLEnv, env_ids: torch.Tensor | Non
     """Advance references and clear observation history when a clip changes."""
     changed_env_ids = MotionResetManager.get().advance(env_ids)
     if changed_env_ids.numel() > 0:
-        env.observation_manager.reset(changed_env_ids)
+        _reset_amp_expert_history(env, changed_env_ids)
 
 
 def update_recovery_status(
@@ -92,7 +115,7 @@ def update_recovery_status(
         success_hold_steps=success_hold_steps,
     )
     if changed_env_ids.numel() > 0:
-        env.observation_manager.reset(changed_env_ids)
+        _reset_amp_expert_history(env, changed_env_ids)
 
 
 class RecoveryAssistForceTerm(ManagerTermBase):
@@ -127,7 +150,7 @@ class RecoveryAssistForceTerm(ManagerTermBase):
         asset_cfg: SceneEntityCfg,
         force_start: float = 0.0,
         force_end: float = 0.0,
-        anneal_iterations: int = 50000,
+        anneal_steps: int = 50000,
     ) -> None:
         if env_ids is None:
             env_ids = torch.arange(env.num_envs, device=env.device)
@@ -147,7 +170,7 @@ class RecoveryAssistForceTerm(ManagerTermBase):
             env,
             force_start=force_start,
             force_end=force_end,
-            anneal_iterations=anneal_iterations,
+            anneal_steps=anneal_steps,
         )
         forces[:, :, 2] = force_magnitude * active[:, None]
         self._asset.permanent_wrench_composer.set_forces_and_torques_index(

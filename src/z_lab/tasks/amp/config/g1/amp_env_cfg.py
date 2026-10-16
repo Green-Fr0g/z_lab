@@ -69,7 +69,9 @@ class G1AmpEnvCfg(AmpFlatEnvCfg):
     recovery_success_hold_steps = 10
     assist_force_start = 200.0
     assist_force_end = 0.0
-    assist_anneal_iterations = 20000
+    # 20,000 PPO rollouts x 24 env steps per rollout.  The task reads
+    # Isaac Lab's common_step_counter, so this remains independent of rsl_rl.
+    assist_anneal_steps = 480_000
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -97,7 +99,7 @@ class G1AmpEnvCfg(AmpFlatEnvCfg):
         self.events.update_recovery_status.params["success_hold_steps"] = self.recovery_success_hold_steps
         self.events.recovery_assist_force.params["force_start"] = self.assist_force_start
         self.events.recovery_assist_force.params["force_end"] = self.assist_force_end
-        self.events.recovery_assist_force.params["anneal_iterations"] = self.assist_anneal_iterations
+        self.events.recovery_assist_force.params["anneal_steps"] = self.assist_anneal_steps
 
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = list(self.joint_names)
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = list(self.joint_names)

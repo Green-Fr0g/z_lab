@@ -405,19 +405,21 @@ class MotionResetManager:
         env,
         force_start: float | None = None,
         force_end: float | None = None,
-        anneal_iterations: int | None = None,
+        anneal_steps: int | None = None,
     ) -> float:
-        iteration = float(getattr(env, "_amp_training_iteration", 0))
-        if anneal_iterations is None:
-            anneal_iterations = getattr(env.cfg, "assist_anneal_iterations", 50000)
+        # Use Isaac Lab's task-side global step counter.  This keeps the schedule
+        # independent of any particular RL runner or rollout implementation.
+        step = max(float(getattr(env, "common_step_counter", 0)), 0.0)
+        if anneal_steps is None:
+            anneal_steps = getattr(env.cfg, "assist_anneal_steps", 50000)
         if force_start is None:
             force_start = getattr(env.cfg, "assist_force_start", 0.0)
         if force_end is None:
             force_end = getattr(env.cfg, "assist_force_end", 0.0)
-        anneal_iterations = max(float(anneal_iterations), 1.0)
+        anneal_steps = max(float(anneal_steps), 1.0)
         start = float(force_start)
         end = float(force_end)
-        alpha = min(max(iteration / anneal_iterations, 0.0), 1.0)
+        alpha = min(max(step / anneal_steps, 0.0), 1.0)
         return start + (end - start) * alpha
 
     def recovery_clip_finished(self) -> torch.Tensor:
