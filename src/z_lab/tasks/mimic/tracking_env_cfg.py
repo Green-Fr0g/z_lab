@@ -342,10 +342,18 @@ class TrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.origin_type = "asset_root"
         self.viewer.asset_name = "robot"
 
-    def play_mode(self):
-        """Adjust the Mimic environment for policy playback."""
-        super().play_mode()
         # Keep playback deterministic and prevent disturbances from changing the reference tracking.
         self.events.physics_material = None
         self.events.add_joint_default_pos = None
         self.events.push_robot = None
+
+
+    def play_mode(self):
+        super().play_mode()
+
+        # 播放时关闭随机推力事件
+        self.events.physics_material = None
+        self.events.add_joint_default_pos = None
+        self.events.push_robot = None
+
+        self.scene.num_envs = 4
