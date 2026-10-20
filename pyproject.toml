@@ -19,6 +19,8 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "isaaclab-dev[rsl-rl]",
+    # declared explicitly so the local rsl_rl fork wins over the PyPI build pulled in by isaaclab-dev
+    "rsl-rl-lib",
 ]
 
 [project.entry-points."isaaclab.tasks"]
@@ -88,6 +90,7 @@ override-dependencies = [
 "isaaclab-tasks-experimental" = { path = "../IsaacLab/source/isaaclab_tasks_experimental", editable = true }
 "isaaclab-teleop" = { path = "../IsaacLab/source/isaaclab_teleop", editable = true }
 "isaaclab-visualizers" = { path = "../IsaacLab/source/isaaclab_visualizers", editable = true }
+"rsl-rl-lib" = { path = "rsl_rl", editable = true }
 "omniverseclient" = { index = "pypi-public" }
 "ovphysx" = { index = "pypi-public" }
 "ovrtx" = { index = "pypi-public" }

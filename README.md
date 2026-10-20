@@ -8,6 +8,22 @@
 - `ZLab-Velocity-Unitree-G1-23DOF`：Unitree G1，23 个策略自由度。
 - `ZLab-Velocity-DR02`：DR02，29 个策略自由度。
 
+G1 另提供三个 AMP 任务，使用共享的专家/policy 特征处理与 AC、判别器联合更新：
+
+| 任务 ID | Actor / Critic | 倒地恢复训练 |
+| --- | --- | --- |
+| `ZLab-AMP-Unitree-G1` | MLP / MLP | 开启 |
+| `ZLab-AMP-Unitree-G1-MoE` | MoE / MoE，各 3 个专家、线性 gate | 开启 |
+| `ZLab-AMP-Unitree-G1-NoRecovery` | MLP / MLP | 关闭 |
+
+MoE 任务的判别器保持 MLP。NoRecovery 任务摔倒后立即 reset，只使用普通动作初始化与专家采样，并关闭恢复高度奖励。
+各任务分别记录到 `g1_amp`、`g1_amp_moe`、`g1_amp_no_recovery` 实验目录。
+
+```bash
+./z_lab.sh -t --task ZLab-AMP-Unitree-G1-MoE
+./z_lab.sh -t --task ZLab-AMP-Unitree-G1-NoRecovery
+```
+
 机器人资产使用 Isaac Lab 的隐式关节执行器。每个机器人的关节顺序、动作缩放、连杆名称、执行器参数和 USD 路径保存在 `src/z_lab/assets/robots` 中。
 
 ## 安装
@@ -41,7 +57,7 @@ uv run --extra isaacsim --extra rerun isaaclab random_agent --task <任务名称
 
 ## 运行任务
 
-当前三个任务的 agent 配置均使用 RSL-RL。可以先查看已经注册的环境：
+上述任务的 agent 配置均使用 RSL-RL。可以先查看已经注册的环境：
 
 ```bash
 uv run isaaclab list_envs --show_presets

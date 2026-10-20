@@ -10,6 +10,9 @@ def test_task_registrations():
         "ZLab-Velocity-Unitree-G1": "UnitreeG1VelocityEnvCfg",
         "ZLab-Velocity-Unitree-G1-23DOF": "UnitreeG123VelocityEnvCfg",
         "ZLab-Velocity-DR02": "DR02VelocityEnvCfg",
+        "ZLab-AMP-Unitree-G1": "UnitreeG1AmpEnvCfg",
+        "ZLab-AMP-Unitree-G1-MoE": "UnitreeG1AmpEnvCfg",
+        "ZLab-AMP-Unitree-G1-NoRecovery": "UnitreeG1AmpNoRecoveryEnvCfg",
     }
     for task_id, class_name in expected.items():
         spec = gym.spec(task_id)
