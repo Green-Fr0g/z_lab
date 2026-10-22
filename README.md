@@ -152,6 +152,8 @@ git lfs pull
 
 ## 开发与检查
 
+AMP 的数据职责、训练流程、可配置判别器特征和与 AMP_mjlab 的对应关系见 [AMP 说明](docs/amp.md)。
+
 运行注册测试和代码质量检查：
 
 ```bash

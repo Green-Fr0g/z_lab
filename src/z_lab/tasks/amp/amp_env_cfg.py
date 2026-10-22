@@ -74,7 +74,7 @@ class AmpCommandsCfg:
         asset_name="robot",
         resampling_time_range=(5.0, 5.0),
         rel_standing_envs=0.02,
-        rel_turn_envs=0.2,
+        rel_turn_envs=0.05,
         rel_heading_envs=0.0,
         heading_command=False,
         debug_vis=False,

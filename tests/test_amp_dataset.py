@@ -1,10 +1,13 @@
 """AMP expert loading, shared feature semantics, and episode-aware rollout contracts."""
 
 from copy import deepcopy
+from typing import Any, cast
 
 import numpy as np
 import pytest
 import torch
+from rsl_rl.modules import EmpiricalNormalization
+from rsl_rl.modules.distribution import GaussianDistribution
 from rsl_rl.utils import AmpDataset, AmpFeatureEncoder
 
 pytestmark = [pytest.mark.unit, pytest.mark.kitless]
@@ -14,7 +17,7 @@ def _write_motion(path, length, base, **overrides):
     # Recorded body/joint order differs from policy order; every field encodes frame identity.
     t = np.arange(length, dtype=np.float32) + base
     root = np.stack([t, np.zeros(length), np.full(length, 0.8)], axis=-1)
-    fields = dict(
+    fields: dict[str, Any] = dict(
         fps=[50],
         body_names=["hand", "root"],
         dof_names=["elbow", "hip"],
@@ -124,6 +127,7 @@ def test_expert_and_policy_share_nontrivial_coordinate_and_name_semantics(tmp_pa
         root_link_name=["root"],
         body_names=["hand", "root"],
         dof_names=["elbow", "hip"],
+        allow_pickle=False,
         **{
             key: raw[name][:, [1, 0]].numpy()
             for name, key in (
@@ -224,6 +228,58 @@ def test_policy_history_padding_done_stride_and_cross_rollout(tmp_path):
         assert sorted(torch.cat([policy[:, 0] for policy, _ in epoch]).tolist()) == expected
 
 
+def test_policy_replay_buffer_pools_recent_features_across_rollouts(tmp_path):
+    """The policy pool keeps stale features across rollouts and bounds its own memory."""
+    _write_motion(tmp_path / "a.npz", 10, 0)
+    single_frame = dict(
+        num_frames=1,
+        obs_string=["joint_vel"],
+        joint_names=["hip"],
+        default_joint_vel=torch.zeros(2),
+        joint_vel_scale=1.0,
+    )
+    dataset = _dataset(tmp_path, replay_buffer_size=4, **single_frame)
+
+    def frame(velocities):
+        packed = torch.zeros(2, 30)
+        packed[:, 9] = packed[:, 13] = 1  # Packed xyzw orientations.
+        packed[:, -2] = velocities
+        return packed
+
+    no_done = torch.tensor([False, False])
+    dataset.initialize_policy(frame(torch.zeros(2)))
+    collected = []
+    for rollout in range(3):
+        for step in range(3):
+            values = torch.tensor([10.0 * rollout + step, 100.0 + 10.0 * rollout + step])
+            collected.append(dataset.add_policy_step(frame(values), no_done)[:, 0])
+        assert dataset.num_samples == 6
+        assert dataset.policy_sample_count == 4
+        pooled = dataset.policy_samples()
+        assert pooled.shape == (4, dataset.obs_dim)
+        # Only the newest four policy features (two steps of two envs) survive the ring buffer.
+        assert sorted(pooled[:, 0].tolist()) == sorted(torch.cat(collected[-2:]).tolist())
+        pooled_values = set(pooled[:, 0].tolist())
+        batches = list(dataset.mini_batch_generator(2, 2))
+        assert len(batches) == 4
+        assert all(policy.shape == expert.shape == (3, dataset.obs_dim) for policy, expert in batches)
+        assert all(set(policy[:, 0].tolist()) <= pooled_values for policy, _ in batches)
+        # Training batch size follows the six-sample rollout even though replay holds four rows.
+        assert sum(len(policy) for policy, _ in batches[:2]) == 6
+        assert dataset.sample_policy(9).shape == (9, dataset.obs_dim)
+        dataset.clear_rollout()
+        assert dataset.policy_sample_count == 4
+
+    # Zero keeps the rollout-only behaviour.
+    rollout_only = _dataset(tmp_path, **single_frame)
+    assert rollout_only.replay_buffer_size == 0
+    rollout_only.initialize_policy(frame(torch.zeros(2)))
+    for step in range(3):
+        rollout_only.add_policy_step(frame(torch.full((2,), float(step))), no_done)
+    assert rollout_only.policy_sample_count == 6
+    torch.testing.assert_close(rollout_only.policy_samples(), rollout_only.policy_history[:3].flatten(0, 1))
+
+
 @pytest.mark.parametrize(
     "invalid, message",
     [
@@ -245,6 +301,8 @@ def test_expert_npz_schema_errors_identify_clip(tmp_path, invalid, message):
         ({"num_frames": True}, "num_frames"),
         ({"history_stride": 1.5}, "history_stride"),
         ({"recovery_sample_ratio": float("nan")}, "recovery_sample_ratio"),
+        ({"replay_buffer_size": -1}, "replay_buffer_size"),
+        ({"replay_buffer_size": True}, "replay_buffer_size"),
         ({"obs_string": ["unknown"]}, "Unknown AMP"),
         ({"body_names": ["hand", "hand"]}, "unique"),
         ({"obs_string": ["joint_pos"]}, "default joint state"),
@@ -256,7 +314,8 @@ def test_invalid_amp_configuration(tmp_path, kwargs, message):
         _dataset(tmp_path, **kwargs)
 
 
-def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path):
+@pytest.mark.parametrize("replay_buffer_size", [0, 4, 32])
+def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path, replay_buffer_size):
     """Exercise real PPO/discriminator updates without a simulator, including Same-Step autoreset."""
     from rsl_rl.algorithms import AMPPPO
     from rsl_rl.models import MLPModel
@@ -264,14 +323,19 @@ def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path):
     from tensordict import TensorDict
 
     _write_motion(tmp_path / "a.npz", 8, 0)
-    dataset = _dataset(
-        tmp_path,
-        num_frames=2,
-        obs_string=["joint_vel"],
-        joint_names=["hip"],
-        default_joint_vel=torch.zeros(2),
-        joint_vel_scale=1.0,
-    )
+    dataset_cfg: dict[str, Any] = {
+        "motion_dir": str(tmp_path),
+        "policy_body_names": ["root", "hand"],
+        "policy_joint_names": ["hip", "elbow"],
+        "anchor_name": "root",
+        "step_dt": 0.02,
+        "num_frames": 2,
+        "obs_string": ["joint_vel"],
+        "joint_names": ["hip"],
+        "default_joint_vel": torch.zeros(2),
+        "joint_vel_scale": 1.0,
+        "replay_buffer_size": replay_buffer_size,
+    }
     obs = TensorDict({"policy": torch.zeros(2, 3), "critic": torch.zeros(2, 4)}, batch_size=[2])
     groups = {"actor": ["policy"], "critic": ["critic"]}
     actor = MLPModel(
@@ -284,28 +348,45 @@ def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path):
     )
     critic = MLPModel(obs, groups, "critic", 1, hidden_dims=[16])
     storage = RolloutStorage("rl", 2, 3, obs, [2])
-    algorithm = AMPPPO(
-        actor,
-        critic,
-        storage,
-        num_learning_epochs=2,
-        num_mini_batches=2,
-        amp_cfg={"amp_dataset": dataset, "discriminator_cfg": {"hidden_dims": [16], "task_reward_lerp": 0.5}},
-    )
+    amp_cfg: dict[str, Any] = {
+        "dataset_cfg": dataset_cfg,
+        "discriminator_cfg": {
+            "class_name": "rsl_rl.models:AMPDiscriminator",
+            "hidden_dims": [16],
+            "task_reward_lerp": 0.5,
+        },
+        "min_normalized_std": 0.5,
+    }
+    algorithm_cfg: dict[str, Any] = {"num_learning_epochs": 2, "num_mini_batches": 2, "amp_cfg": amp_cfg}
+    if replay_buffer_size == 0:
+        # Existing direct callers can migrate independently of serialized runner configurations.
+        amp_cfg["discriminator_cfg"].pop("class_name")
+        amp_cfg["amp_dataset"] = AmpDataset(num_envs=2, num_steps_per_env=3, **amp_cfg.pop("dataset_cfg"))
+        with pytest.warns(DeprecationWarning, match="amp_dataset"):
+            algorithm = AMPPPO(actor, critic, storage, **algorithm_cfg)
+    else:
+        algorithm = AMPPPO(actor, critic, storage, **algorithm_cfg)
+    dataset = algorithm.amp_dataset
+    normalizer = cast(EmpiricalNormalization, algorithm.discriminator.obs_normalizer)
+    distribution = cast(GaussianDistribution, actor.distribution)
 
     # Each optimizer step must carry finite gradients and change all three networks together.
     models = (algorithm.actor, algorithm.critic, algorithm.discriminator)
     step_weights = []
     joint_steps = []
+    normalization_counts = []
 
     def before_step(optimizer, args, kwargs):
+        normalization_counts.append(cast(torch.Tensor, normalizer.count).item())
+        ac_gradients = [p.grad.norm() for model in models[:2] for p in model.parameters() if p.grad is not None]
+        assert torch.stack(ac_gradients).norm() <= algorithm.max_grad_norm + 1e-6
         step_weights.clear()
         optimized = {id(p) for group in optimizer.param_groups for p in group["params"]}
         for model in models:
             parameters = list(model.parameters())
             assert all(id(p) in optimized for p in parameters)
             assert all(p.grad is not None and torch.isfinite(p.grad).all() for p in parameters)
-            assert any(p.grad.abs().sum() > 0 for p in parameters)
+            assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in parameters)
             step_weights.append([p.detach().clone() for p in parameters])
 
     def after_step(optimizer, args, kwargs):
@@ -340,7 +421,11 @@ def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path):
                 final_obs["amp_policy"] = frame(terminal_velocity)
                 extras = {"final_obs": final_obs, "time_outs": done}
                 # The raw final frame determines the reward even though next_obs contains reset state.
-                algorithm.process_env_step(next_obs, torch.ones(2), done, extras)
+                training_rewards = algorithm.process_env_step(next_obs, torch.ones(2), done, extras)
+                expected_rewards, _ = algorithm.discriminator.reward(dataset.policy_history[step], torch.ones(2))
+                torch.testing.assert_close(training_rewards, expected_rewards)
+                assert (training_rewards >= 0.5).all()
+                assert (training_rewards <= 1.0).all()
                 torch.testing.assert_close(dataset.policy_history[step, :, -1], terminal_velocity)
                 obs = next_obs
         assert dataset.num_samples == 6
@@ -354,10 +439,16 @@ def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path):
         assert all(group["lr"] == algorithm.learning_rate for group in algorithm.optimizer.param_groups)
         assert all(state["step"] == expected_steps for state in algorithm.optimizer.state.values())
         assert all(np.isfinite(value) for value in losses.values())
+        assert losses["amp_expert_loss"] >= 0
+        assert losses["amp_policy_loss"] >= 0
+        assert losses["amp_loss"] == pytest.approx(0.5 * (losses["amp_expert_loss"] + losses["amp_policy_loss"]))
         assert losses["amp_grad_pen"] >= 0
         assert dataset.num_samples == storage.step == 0
         assert dataset.policy_initialized
-        assert algorithm.discriminator.obs_normalizer.count == 12 * (rollout + 1)
+        # Four joint optimizer steps, three samples per source and two frames per sample.
+        assert cast(torch.Tensor, normalizer.count).item() == 48 * (rollout + 1)
+        assert normalization_counts == [12 * step for step in range(expected_steps)]
+        assert torch.all(distribution.std_param >= 0.5)
         assert all(p.grad is None or torch.isfinite(p.grad).all() for p in algorithm.discriminator.parameters())
     assert any(
         not torch.equal(before, after)
@@ -367,6 +458,21 @@ def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path):
     after_handle.remove()
     # Checkpoints restore both networks and their shared optimizer, including AMP moments.
     saved = deepcopy(algorithm.save())
+    legacy = deepcopy(saved)
+    legacy["optimizer_state_dict"]["param_groups"][-1]["lr"] = 3e-5
+    legacy_amp = legacy["amp_discriminator_state_dict"]
+    for key in ("_mean", "_var", "_std"):
+        legacy_amp.pop(f"obs_normalizer.{key}")
+    # Migrate both the single-frame and earlier per-history AMP normalizer layouts.
+    for means, variances, count in (([4.0], [9.0], 20.0001), ([2.0, 6.0], [1.0, 9.0], 10.0001)):
+        legacy_amp["obs_normalizer.mean"] = torch.tensor(means, dtype=torch.float64)
+        legacy_amp["obs_normalizer.var"] = torch.tensor(variances, dtype=torch.float64)
+        legacy_amp["obs_normalizer.count"] = torch.tensor(count, dtype=torch.float64)
+        algorithm.load(legacy, None, strict=True)
+        assert all(group["lr"] == algorithm.learning_rate for group in algorithm.optimizer.param_groups)
+        torch.testing.assert_close(normalizer.mean, torch.tensor([4.0]))
+        torch.testing.assert_close(normalizer.std, torch.tensor([3.0]))
+        assert normalizer.count == 20
     with torch.no_grad():
         for model in models:
             for parameter in model.parameters():
@@ -380,6 +486,6 @@ def test_amp_ppo_updates_dataset_rollouts_and_terminal_rewards(tmp_path):
             torch.testing.assert_close(value, saved[key][name])
     assert all(state["step"] == expected_steps for state in algorithm.optimizer.state.values())
     algorithm.eval_mode()
-    count = algorithm.discriminator.obs_normalizer.count.clone()
+    count = cast(torch.Tensor, normalizer.count).clone()
     algorithm.discriminator.update_normalization(torch.zeros(2, 2), torch.zeros(2, 2))
-    assert algorithm.discriminator.obs_normalizer.count == count
+    assert normalizer.count == count
