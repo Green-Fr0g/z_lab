@@ -5,8 +5,6 @@
 
 """Helper functions."""
 
-from .amp_dataset import AmpDataset
-from .amp_features import AmpFeatureEncoder, register_amp_feature
 from .log_writer import LogWriter
 from .neptune_log_writer import NeptuneLogWriter
 from .utils import (
@@ -25,9 +23,6 @@ from .utils import (
 from .wandb_log_writer import WandbLogWriter
 
 __all__ = [
-    "AmpDataset",
-    "AmpFeatureEncoder",
-    "register_amp_feature",
     "LogWriter",
     "NeptuneLogWriter",
     "WandbLogWriter",

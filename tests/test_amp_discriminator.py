@@ -1,68 +1,65 @@
-"""Numerical contracts for temporal normalization, raw gradient penalties, and AMP rewards."""
-
-from typing import cast
+"""Numerical contracts for the AMP discriminator reward and gradient penalty."""
 
 import pytest
 import torch
-import torch.nn as nn
 from rsl_rl.models import AMPDiscriminator
-from rsl_rl.modules import EmpiricalNormalization
 
 pytestmark = [pytest.mark.unit, pytest.mark.kitless]
 
 
-def test_discriminator_shares_frame_statistics_and_preserves_amp_formulas():
-    discriminator = AMPDiscriminator(4, frame_dim=2, hidden_dims=[1], amp_reward_coef=2.0, task_reward_lerp=0.25)
-    policy = torch.tensor([[1.0, 10.0, 3.0, 14.0]])
-    expert = torch.tensor([[5.0, 18.0, 7.0, 22.0]])
-    discriminator.update_normalization(policy, expert)
-    normalizer = cast(EmpiricalNormalization, discriminator.obs_normalizer)
-    input_layer = cast(nn.Linear, discriminator.mlp[0])
-    head = cast(nn.Linear, discriminator.mlp[-1])
-    # Four 2D frames: (1, 10), (3, 14), (5, 18), (7, 22).
-    mean = torch.tensor([4.0, 16.0])
-    variance = torch.tensor([5.0, 20.0])
-    torch.testing.assert_close(normalizer.mean, mean)
-    torch.testing.assert_close(normalizer.std.square(), variance)
-    assert cast(torch.Tensor, normalizer.count).item() == 4
-
+def _fixed_logit_discriminator(logit: float, amp_reward_coef: float, task_reward_lerp: float = 0.0):
+    """Build a discriminator whose output is a constant, so the reward formula is an exact number."""
+    discriminator = AMPDiscriminator(
+        input_dim=4,
+        amp_reward_coef=amp_reward_coef,
+        hidden_layer_sizes=[8],
+        device="cpu",
+        task_reward_lerp=task_reward_lerp,
+    )
     with torch.no_grad():
-        input_layer.weight.copy_(torch.tensor([[1.0, 2.0, 3.0, 4.0]]))
-        input_layer.bias.fill_(100)
-        head.weight.fill_(2)
-        head.bias.fill_(-0.5)
-    # Both temporal positions use the same statistics; the wide bias keeps the ReLU active.
-    scaled = ((expert.reshape(2, 2) - mean) / (variance.sqrt() + 1e-2)).flatten()
-    expected_logit = 2 * (scaled @ torch.tensor([1.0, 2.0, 3.0, 4.0]) + 100) - 0.5
-    torch.testing.assert_close(discriminator(expert).squeeze(), expected_logit)
-    # The optional discriminator clamp remains in effect with the built-in normalizer.
-    outlier = torch.tensor([[1000.0, 16000.0, -1000.0, -16000.0]])
-    torch.testing.assert_close(discriminator(outlier), torch.tensor([[119.5]]))
-    # Raw input gradient is (2, 4, 6, 8), independently of the running normalizer.
-    penalty = discriminator.compute_gradient_penalty(expert, lambda_=10)
-    torch.testing.assert_close(penalty, torch.tensor(1200.0))
+        discriminator.amp_linear.weight.zero_()
+        discriminator.amp_linear.bias.fill_(logit)
+    return discriminator
+
+
+def test_reward_uses_the_quadratic_amp_form_and_clamps_at_zero():
+    state = torch.zeros(3, 2)
+    next_state = torch.zeros(3, 2)
+
+    # logit 1 is the expert target, so the unclamped imitation reward equals the coefficient.
+    reward, logits = _fixed_logit_discriminator(1.0, amp_reward_coef=2.0).reward(state, next_state)
+    torch.testing.assert_close(logits, torch.ones(3))
+    torch.testing.assert_close(reward, torch.full((3,), 2.0))
+
+    # logit -3 gives 1 - 0.25 * 16 = -3, which the AMP reward clamps to zero.
+    reward, _ = _fixed_logit_discriminator(-3.0, amp_reward_coef=2.0).reward(state, next_state)
+    torch.testing.assert_close(reward, torch.zeros(3))
+
+
+def test_task_reward_lerp_requires_and_blends_the_task_terminal_reward():
+    state = torch.zeros(2, 2)
+    next_state = torch.zeros(2, 2)
+    task_reward = torch.tensor([1.0, -1.0])
+    discriminator = _fixed_logit_discriminator(1.0, amp_reward_coef=2.0, task_reward_lerp=0.25)
+
+    with pytest.raises(ValueError, match="task_reward"):
+        discriminator.reward(state, next_state)
+
+    reward, _ = discriminator.reward(state, next_state, task_reward=task_reward)
+    torch.testing.assert_close(reward, 0.75 * torch.tensor([2.0, 2.0]) + 0.25 * task_reward)
+
+
+def test_gradient_penalty_is_smooth_and_does_not_leak_gradients_into_inputs():
+    discriminator = AMPDiscriminator(
+        input_dim=4, amp_reward_coef=1.0, hidden_layer_sizes=[4], device="cpu", activation="relu"
+    )
+    expert_state = torch.randn(5, 2)
+    expert_next_state = torch.randn(5, 2)
+
+    penalty = discriminator.compute_gradient_penalty(expert_state, expert_next_state, lambda_=10.0)
+    assert penalty.ndim == 0 and penalty.item() >= 0.0
     penalty.backward()
-    assert input_layer.weight.grad is not None and torch.isfinite(input_layer.weight.grad).all()
-    assert not expert.requires_grad
-    torch.testing.assert_close(expert, torch.tensor([[5.0, 18.0, 7.0, 22.0]]))
-
-    # Identical inputs still have opposite least-squares targets for the two data sources.
-    loss, metrics = discriminator.compute_loss(expert, expert)
-    expert_loss = (expected_logit - 1).square()
-    policy_loss = (expected_logit + 1).square()
-    torch.testing.assert_close(metrics["amp_expert_loss"], expert_loss)
-    torch.testing.assert_close(metrics["amp_policy_loss"], policy_loss)
-    torch.testing.assert_close(metrics["amp_loss"], 0.5 * (expert_loss + policy_loss))
-    torch.testing.assert_close(metrics["amp_grad_pen"], torch.tensor(1200.0))
-    torch.testing.assert_close(loss, 0.5 * (expert_loss + policy_loss) + 1200)
-    assert loss.requires_grad and all(not value.requires_grad for value in metrics.values())
-
-    with torch.no_grad():
-        head.weight.zero_()
-        head.bias.zero_()
-    reward, prediction = discriminator.reward(policy, torch.tensor([4.0]))
-    torch.testing.assert_close(prediction, torch.zeros(1))
-    torch.testing.assert_close(reward, torch.tensor([2.125]))
-    loss, metrics = discriminator.compute_loss(policy, expert, grad_pen_coef=0)
-    torch.testing.assert_close(loss, torch.tensor(1.0))
-    torch.testing.assert_close(metrics["amp_grad_pen"], torch.tensor(0.0))
+    assert any(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all() for parameter in discriminator.parameters()
+    )
+    assert not expert_state.requires_grad and not expert_next_state.requires_grad

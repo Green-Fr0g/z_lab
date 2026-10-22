@@ -1,307 +1,275 @@
-# Copyright (c) 2021-2026, ETH Zurich and NVIDIA CORPORATION
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
+"""AMP (Adversarial Motion Priors) extension for PPO."""
 
 from __future__ import annotations
 
-import math
-import warnings
-from collections.abc import Generator, Sequence
-from itertools import chain
-from typing import Any, cast
+from copy import deepcopy
 
 import torch
+import torch.nn.functional as F
 from tensordict import TensorDict
 
-from rsl_rl.env import VecEnv
-from rsl_rl.models import AMPDiscriminator, MLPModel
-from rsl_rl.modules.distribution import GaussianDistribution
-from rsl_rl.storage import RolloutStorage
-from rsl_rl.utils import AmpDataset, reduce_gradients_in_buckets, resolve_class
-
-from .ppo import PPO
+from rsl_rl.algorithms.ppo import PPO
+from rsl_rl.models.amp_discriminator import AMPDiscriminator
+from rsl_rl.modules.normalization import EmpiricalNormalization
+from rsl_rl.storage import AMPStorage, RolloutStorage
+from rsl_rl.utils import resolve_callable, resolve_obs_groups, resolve_optimizer
 
 
 class AMPPPO(PPO):
-    """PPO with shared expert/policy feature generation owned by AmpDataset.
-
-    The environment provides raw single-frame observations. Actor/critic observations and PPO
-    optimization retain the standard model interfaces; AMP history and rollout data live in the
-    dataset, and discriminator width follows its encoded feature layout.
-    """
-
-    amp_dataset: AmpDataset
-    """Expert clips, policy history, rollout samples, and replay."""
-
-    discriminator: AMPDiscriminator
-    """Motion discriminator trained jointly with the actor and critic."""
+    """PPO with a transition-based AMP discriminator."""
 
     def __init__(
         self,
-        actor: MLPModel,
-        critic: MLPModel,
-        storage: RolloutStorage,
-        amp_cfg: dict | None = None,
+        actor,
+        critic,
+        storage,
         device: str = "cpu",
         multi_gpu_cfg: dict | None = None,
-        **kwargs: Any,
+        amp_cfg: dict | None = None,
+        **kwargs,
     ) -> None:
-        """Initialize PPO and construct AMP components from the resolved extension configuration.
-
-        ``amp_cfg.dataset_cfg`` provides motion paths, robot metadata, features, and temporal
-        sampling. :meth:`construct_algorithm` resolves the environment metadata before construction.
-        ``discriminator_cfg`` follows RSL-RL's ``class_name`` model configuration convention.
-        The extension also configures gradient penalty, weight decay, and an optional action-noise
-        floor. Epochs, mini-batches, optimizer, and learning-rate schedule are inherited from PPO.
-        Only actor/critic gradients are clipped, as in AMP_mjlab.
-        """
         super().__init__(actor, critic, storage, device=device, multi_gpu_cfg=multi_gpu_cfg, **kwargs)
-        config = dict(amp_cfg or {})
-        self.amp_policy_key = config.pop("amp_policy_key", "amp_policy")
-        dataset_cfg = config.pop("dataset_cfg", None)
-        legacy_dataset = config.pop("amp_dataset", None)
-        if legacy_dataset is not None:
-            warnings.warn(
-                "amp_cfg['amp_dataset'] is deprecated. Pass constructor arguments through amp_cfg['dataset_cfg'].",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if dataset_cfg is not None:
-                raise ValueError("Provide dataset_cfg or the deprecated amp_dataset, not both.")
-            self.amp_dataset = legacy_dataset
-        else:
-            if dataset_cfg is None:
-                raise ValueError("AMP requires dataset_cfg with motion paths, robot metadata, and step_dt.")
-            self.amp_dataset = AmpDataset(
-                **dataset_cfg,
-                num_envs=storage.num_envs,
-                num_steps_per_env=storage.num_transitions_per_env,
-                device=self.device,
-            )
-        if (
-            self.amp_dataset.num_envs != storage.num_envs
-            or self.amp_dataset.num_steps_per_env != storage.num_transitions_per_env
-        ):
-            raise ValueError("AMP dataset and PPO storage must have the same rollout capacity.")
-        discriminator_class, discriminator_cfg = resolve_class(
-            {"class_name": "rsl_rl.models:AMPDiscriminator", **config.pop("discriminator_cfg", {})}
+
+        if amp_cfg is None:
+            raise ValueError("The AMP configuration 'amp_cfg' is required for AMPPPO.")
+
+        self.amp_cfg = amp_cfg
+        self.amp_state_key = amp_cfg["amp_state_key"]
+        self.state_dim = amp_cfg["state_dim"]
+        self.discriminator = AMPDiscriminator(
+            input_dim=amp_cfg["discriminator_input_dim"],
+            amp_reward_coef=amp_cfg.get("amp_reward_coef", 1.0),
+            hidden_layer_sizes=amp_cfg.get("amp_discr_hidden_dims", [1024, 512]),
+            device=device,
+            activation=amp_cfg.get("amp_discr_activation", "relu"),
+            task_reward_lerp=amp_cfg.get("amp_task_reward_lerp", 0.0),
         )
-        self.discriminator = discriminator_class(
-            self.amp_dataset.obs_dim, frame_dim=self.amp_dataset.frame_dim, **discriminator_cfg
+        self.amp_storage = AMPStorage(self.state_dim, amp_cfg.get("amp_replay_buffer_size", 1000000), device)
+        self.amp_normalizer = EmpiricalNormalization(
+            shape=self.state_dim, until=int(amp_cfg.get("normalization_until", 1.0e8))
         ).to(device)
-        for name, value in (
-            ("num_learning_epochs", self.num_learning_epochs),
-            ("num_mini_batches", self.num_mini_batches),
-        ):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(f"AMP {name} must be a positive integer, got {value!r}.")
-        if self.num_mini_batches > storage.num_envs * storage.num_transitions_per_env:
-            raise ValueError("AMP num_mini_batches must not exceed the rollout sample count.")
+        motion_loader_class_name = amp_cfg.get("motion_loader_class_name")
+        if not motion_loader_class_name:
+            raise ValueError("AMPPPO requires amp_cfg.motion_loader_class_name.")
+        motion_loader_class = resolve_callable(motion_loader_class_name)
+        motion_loader_kwargs = dict(amp_cfg.get("motion_loader_kwargs", {}))
+        if "motion_files" not in motion_loader_kwargs and "amp_motion_files" in amp_cfg:
+            motion_loader_kwargs["motion_files"] = amp_cfg["amp_motion_files"]
+        self.amp_data = motion_loader_class(
+            device=device,
+            time_between_frames=amp_cfg.get("time_between_frames", 0.02),
+            **motion_loader_kwargs,
+        )
+        expert_state_dim = getattr(self.amp_data, "state_dim", None)
+        if expert_state_dim is not None and expert_state_dim != self.state_dim:
+            raise ValueError(
+                f"AMP expert state dimension mismatch: observation '{self.amp_state_key}' has "
+                f"dimension {self.state_dim}, motion loader has {expert_state_dim}."
+            )
 
-        self.grad_pen_coef = config.pop("grad_pen_coef", 10.0)
-        # AMP_mjlab keeps the action noise above a per-joint floor so the Gaussian never collapses.
-        self.min_normalized_std = self._resolve_min_std(config.pop("min_normalized_std", None))
-        trunk_weight_decay = config.pop("trunk_weight_decay", 1e-3)
-        head_weight_decay = config.pop("head_weight_decay", 1e-1)
-        if config:
-            raise ValueError(f"Unknown AMP configuration keys: {sorted(config)}.")
-        if not math.isfinite(self.grad_pen_coef) or self.grad_pen_coef < 0 or self.max_grad_norm <= 0:
-            raise ValueError("AMP grad_pen_coef must be nonnegative and max_grad_norm must be positive.")
-        self._configure_discriminator_optimizer(trunk_weight_decay, head_weight_decay)
+        disc_opt_class = resolve_optimizer(amp_cfg.get("discriminator_optimizer", "adam"))
+        self.discriminator_optimizer = disc_opt_class(
+            [
+                {
+                    "params": self.discriminator.trunk.parameters(),
+                    "weight_decay": amp_cfg.get("amp_trunk_weight_decay", 1e-3),
+                },
+                {
+                    "params": self.discriminator.amp_linear.parameters(),
+                    "weight_decay": amp_cfg.get("amp_head_weight_decay", 1e-2),
+                },
+            ],
+            lr=amp_cfg.get("discriminator_lr", 1e-3),
+        )
 
-        self._amp_batches: Generator[tuple[torch.Tensor, torch.Tensor], None, None] | None = None
-        self._amp_normalization_batch: tuple[torch.Tensor, torch.Tensor] | None = None
-        self._amp_totals: dict[str, torch.Tensor] = {}
-        self._amp_updates = 0
+        self.grad_pen_coef = amp_cfg.get("grad_pen_coef", 10.0)
+        self._current_amp_state = None
 
     def act(self, obs: TensorDict) -> torch.Tensor:
-        """Initialize raw history once and pass only PPO observations into its transition."""
-        if self.transition.actions is not None:
-            raise RuntimeError("process_env_step must follow each AMP act call.")
-        if not self.amp_dataset.policy_initialized:
-            self.amp_dataset.initialize_policy(obs[self.amp_policy_key])
-        return super().act(obs.select(*self.storage.observations.keys()))
+        """Cache the current AMP state before sampling actions."""
+        self._current_amp_state = obs[self.amp_state_key].detach().clone()
+        return super().act(obs)
 
     def process_env_step(
-        self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict
-    ) -> torch.Tensor:
-        """Store terminal-corrected features and return mixed task/style rewards for logging."""
-        if self.transition.actions is None:
-            raise RuntimeError("AMPPPO.process_env_step must follow act.")
-        final_obs = extras.get("final_obs")
-        policy_history = self.amp_dataset.add_policy_step(
-            obs[self.amp_policy_key],
-            dones,
-            None if final_obs is None else final_obs[self.amp_policy_key],
-        )
-        amp_rewards, _ = self.discriminator.reward(policy_history, rewards)
-        super().process_env_step(obs.select(*self.storage.observations.keys()), amp_rewards, dones, extras)
-        return amp_rewards
+        self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict[str, torch.Tensor]
+    ) -> None:
+        """Store the AMP transition and replace the task reward with AMP reward."""
+        if self._current_amp_state is None:
+            raise RuntimeError("AMPPPO.process_env_step() must be called after act().")
+
+        next_amp_state = obs[self.amp_state_key].clone()
+        reset_env_ids = (dones > 0).nonzero(as_tuple=False).flatten()
+        if len(reset_env_ids) > 0:
+            next_amp_state[reset_env_ids] = self._current_amp_state[reset_env_ids]
+
+        self.amp_storage.add(self._current_amp_state, next_amp_state)
+        amp_reward, _ = self.discriminator.reward(self._current_amp_state, next_amp_state, rewards, self.amp_normalizer)
+        training_rewards = super().process_env_step(obs, amp_reward.reshape(-1), dones, extras)
+        self._current_amp_state = next_amp_state.detach().clone()
+        return training_rewards
 
     def update(self) -> dict[str, float]:
-        """Update AC and the discriminator together on each mini-batch, then clear the rollout."""
-        if self.amp_dataset.step != self.storage.step or self.storage.step != self.storage.num_transitions_per_env:
-            raise RuntimeError("PPO and AMP storage must contain the same complete rollout before update().")
-        self._amp_totals.clear()
-        self._amp_updates = 0
-        self._amp_batches = self.amp_dataset.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        try:
-            loss_dict = super().update()
-        finally:
-            self._amp_batches.close()
-            self._amp_batches = None
-            self._amp_normalization_batch = None
-        # AMP_mjlab averages the discriminator losses over the mini-batches it actually optimized.
-        updates = max(self._amp_updates, 1)
-        mean_metrics = torch.stack(list(self._amp_totals.values())) / updates
-        loss_dict.update(zip(self._amp_totals, mean_metrics.tolist(), strict=True))
-        self.amp_dataset.clear_rollout()
+        """Run PPO updates followed by discriminator training."""
+        loss_dict = super().update()
+        mini_batch_size = self.storage.num_envs * self.storage.num_transitions_per_env // self.num_mini_batches
+        # Train the discriminator as soon as the buffer holds any samples. During the cold-start
+        # the buffer may hold fewer than one mini-batch, so cap the per-update batch size to the
+        # samples currently available instead of skipping discriminator training entirely.
+        num_samples = self.amp_storage.num_samples
+        if num_samples > 0:
+            num_updates = self.num_learning_epochs * self.num_mini_batches
+            amp_batch_size = min(mini_batch_size, num_samples)
+            mean_amp_loss = 0.0
+            mean_grad_pen_loss = 0.0
+            mean_policy_pred = 0.0
+            mean_expert_pred = 0.0
+
+            self.amp_normalizer.train()
+            policy_generator = self.amp_storage.mini_batch_generator(num_updates, amp_batch_size)
+            expert_generator = self.amp_data.mini_batch_generator(num_updates, amp_batch_size)
+
+            for (policy_state, policy_next_state), (expert_state, expert_next_state) in zip(
+                policy_generator, expert_generator
+            ):
+                policy_state_norm = self.amp_normalizer(policy_state)
+                policy_next_state_norm = self.amp_normalizer(policy_next_state)
+                expert_state_norm = self.amp_normalizer(expert_state)
+                expert_next_state_norm = self.amp_normalizer(expert_next_state)
+
+                policy_d = self.discriminator(torch.cat([policy_state_norm, policy_next_state_norm], dim=-1))
+                expert_d = self.discriminator(torch.cat([expert_state_norm, expert_next_state_norm], dim=-1))
+                expert_loss = F.mse_loss(expert_d, torch.ones_like(expert_d))
+                policy_loss = F.mse_loss(policy_d, -torch.ones_like(policy_d))
+                amp_loss = 0.5 * (expert_loss + policy_loss)
+                grad_pen_loss = self.discriminator.compute_gradient_penalty(
+                    expert_state_norm, expert_next_state_norm, lambda_=self.grad_pen_coef
+                )
+                loss = amp_loss + grad_pen_loss
+
+                self.discriminator_optimizer.zero_grad()
+                loss.backward()
+                if self.is_multi_gpu:
+                    self.reduce_discriminator_parameters()
+                self.discriminator_optimizer.step()
+
+                self.amp_normalizer.update(policy_state.detach())
+                self.amp_normalizer.update(policy_next_state.detach())
+                self.amp_normalizer.update(expert_state.detach())
+                self.amp_normalizer.update(expert_next_state.detach())
+
+                mean_amp_loss += amp_loss.item()
+                mean_grad_pen_loss += grad_pen_loss.item()
+                mean_policy_pred += policy_d.mean().item()
+                mean_expert_pred += expert_d.mean().item()
+
+            loss_dict["amp_loss"] = mean_amp_loss / num_updates
+            loss_dict["amp_grad_pen"] = mean_grad_pen_loss / num_updates
+            loss_dict["amp_policy_pred"] = mean_policy_pred / num_updates
+            loss_dict["amp_expert_pred"] = mean_expert_pred / num_updates
         return loss_dict
 
-    def _compute_auxiliary_loss(self) -> torch.Tensor:
-        """Draw one policy/expert pair and compute the least-squares loss plus gradient penalty."""
-        assert self._amp_batches is not None
-        policy_batch, expert_batch = next(self._amp_batches)
-        loss, metrics = self.discriminator.compute_loss(policy_batch, expert_batch, self.grad_pen_coef)
-        # Retain raw features until the optimizer step completes; never feed normalized outputs
-        # back into running statistics.
-        self._amp_normalization_batch = (policy_batch, expert_batch)
-        self._amp_updates += 1
-        for name, value in metrics.items():
-            self._amp_totals[name] = self._amp_totals.get(name, 0.0) + value
-        return loss
-
-    def _clip_gradients(self) -> None:
-        """Clip the combined actor/critic norm, leaving discriminator gradients unclipped."""
-        torch.nn.utils.clip_grad_norm_(chain(self.actor.parameters(), self.critic.parameters()), self.max_grad_norm)
-
-    def _after_optimizer_step(self) -> None:
-        """Enforce the action-noise floor and merge raw frames into shared AMP statistics."""
-        self._clamp_action_std()
-        assert self._amp_normalization_batch is not None
-        self.discriminator.update_normalization(*self._amp_normalization_batch)
-        self._amp_normalization_batch = None
-
     def train_mode(self) -> None:
-        """Enable training for PPO models and the discriminator normalizer."""
+        """Set train mode for policy, discriminator, and AMP normalizer."""
         super().train_mode()
         self.discriminator.train()
+        self.amp_normalizer.train()
 
     def eval_mode(self) -> None:
-        """Enable evaluation and freeze discriminator normalization statistics."""
+        """Set evaluation mode for policy and discriminator."""
         super().eval_mode()
         self.discriminator.eval()
 
     def save(self) -> dict:
-        """Include discriminator weights and normalization alongside the shared optimizer."""
+        """Save policy, discriminator, optimizer, and AMP normalizer states."""
         saved_dict = super().save()
         saved_dict["amp_discriminator_state_dict"] = self.discriminator.state_dict()
+        saved_dict["amp_discriminator_optimizer_state_dict"] = self.discriminator_optimizer.state_dict()
+        saved_dict["amp_normalizer_state_dict"] = self.amp_normalizer.state_dict()
         return saved_dict
 
     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
-        """Load AMP states alongside the states selected by PPO.
-
-        With no load_cfg, restore everything. The ``optimizer`` flag restores the shared AC/AMP
-        optimizer, and ``discriminator`` controls discriminator weights and normalization.
-        Actor-only checkpoints can initialize the policy without changing AMP.
-        """
+        """Load the discriminator and AMP normalizer in addition to the policy."""
         load_iteration = super().load(loaded_dict, load_cfg, strict)
-        for group in self.optimizer.param_groups:
-            group["lr"] = self.learning_rate
-        if load_cfg is None or load_cfg.get("discriminator"):
-            self.discriminator.load_state_dict(loaded_dict["amp_discriminator_state_dict"], strict=strict)
+
+        discriminator_state = loaded_dict.get("amp_discriminator_state_dict") or loaded_dict.get(
+            "discriminator_state_dict"
+        )
+        if discriminator_state is not None:
+            self.discriminator.load_state_dict(discriminator_state, strict=strict)
+
+        optimizer_state = loaded_dict.get("amp_discriminator_optimizer_state_dict") or loaded_dict.get(
+            "discriminator_optimizer_state_dict"
+        )
+        if optimizer_state is not None:
+            self.discriminator_optimizer.load_state_dict(optimizer_state)
+
+        normalizer_state = loaded_dict.get("amp_normalizer_state_dict") or loaded_dict.get("amp_normalizer")
+        if normalizer_state is not None:
+            self.amp_normalizer.load_state_dict(normalizer_state)
+
         return load_iteration
 
     @staticmethod
-    def construct_algorithm(obs: TensorDict, env: VecEnv, cfg: dict, device: str) -> AMPPPO:
-        """Resolve AMP metadata, then use PPO's model, storage, and algorithm construction.
+    def construct_algorithm(obs: TensorDict, env, cfg: dict, device: str) -> "AMPPPO":
+        """Construct AMP-PPO with all AMP settings resolved in one pass."""
+        config = deepcopy(cfg)
+        algorithm_cfg = config["algorithm"]
+        amp_cfg = deepcopy(algorithm_cfg.pop("amp_cfg"))
+        if amp_cfg is None:
+            raise ValueError("AMPPPO requires algorithm.amp_cfg.")
 
-        Configuration contains only constructor arguments. Large Dataset buffers are allocated
-        in :meth:`__init__`, after RSL-RL resolves and copies the algorithm configuration.
-        The task's reset loader remains independent of the training dataset.
-        """
-        algorithm_cfg = dict(cfg["algorithm"])
-        amp_cfg = dict(algorithm_cfg.get("amp_cfg") or {})
-        policy_key = amp_cfg.get("amp_policy_key", "amp_policy")
-        base_env = cast(Any, env).unwrapped
-        if not base_env.cfg.compute_final_obs:
-            raise ValueError("AMP training requires compute_final_obs=True for terminal policy windows.")
-        motion_cfg = base_env.cfg.events.init_amp_motion.params
-        asset = base_env.scene[motion_cfg["asset_cfg"].name]
-        amp_cfg["dataset_cfg"] = {
-            "motion_dir": motion_cfg["motion_dir"],
-            "recovery_dir": motion_cfg.get("recovery_dir"),
-            "recovery_name_patterns": motion_cfg.get("recovery_name_patterns", ("fall", "getup", "get_up", "recovery")),
-            "body_names": base_env.cfg.amp_body_names or asset.body_names,
-            "joint_names": base_env.cfg.amp_joint_names or asset.joint_names,
-            "anchor_name": base_env.cfg.amp_anchor_name,
-            **amp_cfg.get("dataset_cfg", {}),
-            "policy_body_names": asset.body_names,
-            "policy_joint_names": asset.joint_names,
-            "default_joint_pos": asset.data.default_joint_pos.torch[0],
-            "default_joint_vel": asset.data.default_joint_vel.torch[0],
-            "step_dt": base_env.step_dt,
-        }
-        algorithm_cfg["amp_cfg"] = amp_cfg
-        # PPO stores only its observations, never the full raw AMP state.
-        ppo_cfg = {**cfg, "algorithm": algorithm_cfg}
-        ppo_cfg["obs_groups"] = {name: groups for name, groups in cfg["obs_groups"].items() if name != policy_key}
-        alg = cast(AMPPPO, PPO.construct_algorithm(obs.exclude(policy_key), env, ppo_cfg, device))
-        alg.amp_dataset.initialize_policy(obs[policy_key])
-        return alg
+        state_key = amp_cfg["amp_state_key"]
+        if state_key not in obs:
+            raise ValueError(f"AMP observation '{state_key}' is missing. Available: {list(obs.keys())}")
+        state = obs[state_key]
+        if not isinstance(state, torch.Tensor) or state.ndim != 2:
+            raise ValueError(f"AMP observation '{state_key}' must be a 2-D tensor.")
+        amp_cfg["state_dim"] = int(state.shape[-1])
+        amp_cfg["discriminator_input_dim"] = 2 * amp_cfg["state_dim"]
+        amp_cfg.setdefault("time_between_frames", env.unwrapped.step_dt)
+
+        obs_groups = resolve_obs_groups(obs, deepcopy(config.get("obs_groups", {})), ["actor", "critic", state_key])
+        actor_class = resolve_callable(config["actor"].pop("class_name"))
+        critic_class = resolve_callable(config["critic"].pop("class_name"))
+        actor = actor_class(obs, obs_groups, "actor", env.num_actions, **config["actor"]).to(device)
+        critic = critic_class(obs, obs_groups, "critic", 1, **config["critic"]).to(device)
+        storage = RolloutStorage("rl", env.num_envs, config["num_steps_per_env"], obs, [env.num_actions], device)
+        algorithm_cfg.pop("class_name", None)
+        algorithm_cfg.pop("share_cnn_encoders", None)
+        if algorithm_cfg.pop("rnd_cfg", None) is not None:
+            raise ValueError("AMPPPO does not support RND.")
+        if algorithm_cfg.pop("symmetry_cfg", None) is not None:
+            raise ValueError("AMPPPO does not support symmetry augmentation.")
+        algorithm = AMPPPO(
+            actor,
+            critic,
+            storage,
+            device=device,
+            amp_cfg=amp_cfg,
+            multi_gpu_cfg=config.get("multi_gpu"),
+            **algorithm_cfg,
+        )
+        algorithm.compile(config.get("torch_compile_mode"))
+        return algorithm
 
     def broadcast_parameters(self) -> None:
-        """Synchronize PPO and discriminator parameters and buffers from rank zero."""
+        """Broadcast actor, critic, discriminator, and AMP normalizer parameters."""
         super().broadcast_parameters()
-        for tensor in self.discriminator.state_dict().values():
-            torch.distributed.broadcast(tensor, src=0)
+        state_dicts = [self.discriminator.state_dict(), self.amp_normalizer.state_dict()]
+        torch.distributed.broadcast_object_list(state_dicts, src=0)
+        self.discriminator.load_state_dict(state_dicts[0])
+        self.amp_normalizer.load_state_dict(state_dicts[1])
 
-    def reduce_parameters(self) -> None:
-        """Average AC and discriminator gradients before the shared optimizer step."""
-        super().reduce_parameters()
-        reduce_gradients_in_buckets(self.discriminator.parameters(), self.gpu_world_size, self.grad_reduce_bucket_mb)
-
-    def _configure_discriminator_optimizer(self, trunk_weight_decay: float, head_weight_decay: float) -> None:
-        """Add the discriminator's trunk and head to PPO's shared optimizer."""
-        head = self.discriminator.mlp[-1]
-        head_parameter_ids = {id(parameter) for parameter in head.parameters()}
-        trunk_parameters = [
-            parameter for parameter in self.discriminator.parameters() if id(parameter) not in head_parameter_ids
-        ]
-        self.optimizer.add_param_group(
-            {"params": trunk_parameters, "weight_decay": trunk_weight_decay, "name": "amp_trunk"}
-        )
-        self.optimizer.add_param_group(
-            {"params": head.parameters(), "weight_decay": head_weight_decay, "name": "amp_head"}
-        )
-
-    def _resolve_min_std(self, value: float | Sequence[float] | None) -> torch.Tensor | None:
-        """Resolve a scalar or per-action Gaussian noise floor."""
-        if value is None:
-            return None
-        distribution = self._raw_actor.distribution
-        if not isinstance(distribution, GaussianDistribution):
-            raise ValueError("min_normalized_std requires a state-independent GaussianDistribution.")
-        num_actions = distribution.output_dim
-        floors = [float(value)] if isinstance(value, (int, float)) else [float(item) for item in value]
-        if not floors or not all(math.isfinite(item) and item >= 0 for item in floors):
-            raise ValueError(f"min_normalized_std must be nonnegative, got {value!r}.")
-        if len(floors) == 1:
-            floors *= num_actions
-        if len(floors) != num_actions:
-            raise ValueError(f"min_normalized_std requires one scalar or {num_actions} values, got {len(floors)}.")
-        return torch.tensor(floors, device=self.device, dtype=torch.float32)
-
-    @torch.no_grad()
-    def _clamp_action_std(self) -> None:
-        """Keep the actor's noise above ``min_normalized_std`` after an optimizer step."""
-        if self.min_normalized_std is None:
+    def reduce_discriminator_parameters(self) -> None:
+        """Average discriminator gradients across GPUs."""
+        params = [param for param in self.discriminator.parameters() if param.grad is not None]
+        if not params:
             return
-        distribution = self._raw_actor.distribution
-        assert isinstance(distribution, GaussianDistribution)
-        floor = self.min_normalized_std
-        if distribution.std_type == "scalar":
-            distribution.std_param.clamp_(min=floor)
-        else:
-            distribution.log_std_param.clamp_(min=torch.log(floor.clamp_min(1e-6)))
+        flat_grads = torch.cat([param.grad.detach().reshape(-1) for param in params])
+        torch.distributed.all_reduce(flat_grads, op=torch.distributed.ReduceOp.SUM)
+        flat_grads /= self.gpu_world_size
+        offset = 0
+        for param in params:
+            numel = param.numel()
+            param.grad.data.copy_(flat_grads[offset : offset + numel].view_as(param.grad.data))
+            offset += numel

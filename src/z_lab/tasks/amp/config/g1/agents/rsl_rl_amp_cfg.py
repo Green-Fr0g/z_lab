@@ -1,179 +1,134 @@
-from dataclasses import field
+"""AMP agent configuration for the Unitree G1."""
+
+from dataclasses import MISSING
+from typing import Any
 
 from isaaclab.utils import configclass
 
 from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
-
-@configclass
-class RslRlAmpDatasetCfg:
-    """Shared feature and sampling configuration; robot metadata is resolved from the environment."""
-
-    num_frames: int = 2
-    """Number of frames per discriminator input, ordered from oldest to newest."""
-
-    history_stride: int = 1
-    """Control steps between consecutive selected frames."""
-
-    recovery_sample_ratio: float = 0.2
-    """Recovery fraction of each expert batch."""
-
-    replay_buffer_size: int = 0
-    """Policy replay capacity; zero uses only current-rollout samples."""
-
-    obs_string: list[str] = field(
-        default_factory=lambda: ["body_pos_b", "body_ori_b", "body_lin_vel_b", "body_ang_vel_b"]
-    )
-    """Ordered registered features, shared by expert and policy. Anchor gravity uses body_gravity_b."""
-
-    joint_pos_scale: float = 1.0
-    """Multiplier applied to joint positions relative to the robot's defaults."""
-
-    joint_vel_scale: float = 0.05
-    """Multiplier applied to joint velocities relative to the robot's defaults."""
+from z_lab.assets.robots.g1 import G1_AMP_LINK_NAMES, G1_ANCHOR_LINK_NAME
+from z_lab.tasks.amp.config.g1.amp_env_cfg import G1_AMP_ALL_BODY_NAMES, G1_AMP_MOTION_DIR
 
 
 @configclass
-class RslRlAmpDiscriminatorCfg:
-    """Configuration for the discriminator model; feature dimensions are inferred from the Dataset."""
+class AmpCfg:
+    """Configuration for the AMP discriminator and motion data."""
 
-    class_name: str = "rsl_rl.models:AMPDiscriminator"
-    hidden_dims: list[int] = field(default_factory=lambda: [1024, 512, 256])
-    activation: str = "relu"
-    obs_normalization: bool = True
-    obs_eps: float = 1e-2
-    obs_clip: float | None = 10.0
-    amp_reward_coef: float = 1.0
-    """Scale of the quadratic imitation reward before mixing with task rewards."""
+    amp_reward_coef: float = MISSING
+    """The coefficient used to scale the AMP reward."""
 
-    task_reward_lerp: float = 0.0
-    """Task reward fraction in [0, 1]."""
+    amp_replay_buffer_size: int = MISSING
+    """The capacity of the AMP replay buffer."""
+
+    amp_discr_hidden_dims: list[int] = MISSING
+    """The hidden dimensions of the AMP discriminator."""
+
+    amp_discr_activation: str = MISSING
+    """The activation function used by the AMP discriminator."""
+
+    discriminator_lr: float = MISSING
+    """The learning rate of the AMP discriminator."""
+
+    discriminator_optimizer: str = MISSING
+    """The optimizer used for the AMP discriminator."""
+
+    amp_trunk_weight_decay: float = MISSING
+    """The weight decay applied to the discriminator trunk."""
+
+    amp_head_weight_decay: float = MISSING
+    """The weight decay applied to the discriminator head."""
+
+    grad_pen_coef: float = MISSING
+    """The coefficient of the discriminator gradient penalty."""
+
+    amp_task_reward_lerp: float = MISSING
+    """The interpolation factor between task and AMP rewards."""
+
+    amp_state_key: str = MISSING
+    """The observation key used for the AMP expert state."""
+
+    motion_loader_class_name: str = MISSING
+    """The import path of the motion loader class."""
+
+    motion_loader_kwargs: dict[str, Any] = MISSING
+    """The keyword arguments passed to the motion loader."""
 
 
 @configclass
-class RslRlAmpCfg:
-    """AMP extension configuration, serialized to dictionaries for RSL-RL."""
-
-    amp_policy_key: str = "amp_policy"
-    """Environment observation group containing packed, single-frame body/joint states."""
-
-    dataset_cfg: RslRlAmpDatasetCfg = field(default_factory=RslRlAmpDatasetCfg)
-    discriminator_cfg: RslRlAmpDiscriminatorCfg = field(default_factory=RslRlAmpDiscriminatorCfg)
-    grad_pen_coef: float = 10.0
-    trunk_weight_decay: float = 1e-3
-    head_weight_decay: float = 1e-1
-    min_normalized_std: float | list[float] | None = None
-    """Scalar or per-action floor for a state-independent Gaussian policy's standard deviation."""
-
-
-@configclass
-class RslRlAmpPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
-    """PPO that also trains an AMP discriminator on the motion clips."""
+class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
+    """Configuration for an AMP algorithm based on PPO."""
 
     class_name: str = "AMPPPO"
+    """The AMP algorithm class name."""
 
-    amp_cfg: RslRlAmpCfg = field(default_factory=RslRlAmpCfg)
-    """AMP settings passed to :class:`AMPPPO`.
-
-    ``dataset_cfg`` selects shared features and temporal sampling. The algorithm constructs the
-    dataset from motion paths and robot metadata; the environment only produces raw policy frames.
-    Replay batches follow PPO's mini-batch size and update count. The discriminator shares PPO's
-    optimizer and learning-rate schedule. ``obs_string`` controls the ordered features of both
-    expert and policy inputs; normalization statistics are shared across temporal positions.
-    """
+    amp_cfg: AmpCfg = MISSING
+    """The AMP-specific algorithm configuration."""
 
 
 @configclass
-class RslRlMoEModelCfg(RslRlMLPModelCfg):
-    """Dense mixture of experts with the same observation/distribution interface as an MLP."""
+class RslRlAmpRunnerCfg(RslRlOnPolicyRunnerCfg):
+    """Configuration for an on-policy runner using AMP."""
 
-    class_name: str = "MoEModel"
-    num_experts: int = 3
-    gate_hidden_dims: list[int] = field(default_factory=list)
+    algorithm: RslRlAmpAlgorithmCfg = MISSING
+    """The AMP algorithm configuration."""
 
 
 @configclass
-class G1AmpPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+class G1AmpPPORunnerCfg(RslRlAmpRunnerCfg):
+    """AMP-PPO runner for the Unitree G1 flat locomotion task."""
+
     num_steps_per_env = 24
-    max_iterations = 30000
-    save_interval = 500
-    experiment_name = "g1_amp"
+    max_iterations = 5000
+    save_interval = 50
+    experiment_name = "g1_amp_flat"
+
+    obs_groups = {"actor": ["policy"], "critic": ["critic"], "amp_state": ["amp_state"]}
+    """Policy, critic, and discriminator inputs available from the environment."""
+
     actor = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
         activation="elu",
-        obs_normalization=True,
+        obs_normalization=False,
         distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
         activation="elu",
-        obs_normalization=True,
+        obs_normalization=False,
     )
-    algorithm: RslRlAmpPpoAlgorithmCfg = RslRlAmpPpoAlgorithmCfg(
+    algorithm = RslRlAmpAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.005,
+        entropy_coef=0.008,
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=1e-3,
+        learning_rate=1.0e-3,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
-        amp_cfg=RslRlAmpCfg(
-            amp_policy_key="amp_policy",
-            dataset_cfg=RslRlAmpDatasetCfg(
-                num_frames=2,
-                history_stride=1,
-                recovery_sample_ratio=0.2,
-                replay_buffer_size=100_000,
-                # Shared expert/policy feature order; optional anchor gravity: "body_gravity_b".
-                obs_string=["body_pos_b", "body_ori_b", "body_lin_vel_b", "body_ang_vel_b"],
-            ),
-            discriminator_cfg=RslRlAmpDiscriminatorCfg(
-                hidden_dims=[1024, 512, 256],
-                activation="relu",
-                obs_normalization=True,
-                task_reward_lerp=0.75,
-                amp_reward_coef=0.1,
-            ),
+        amp_cfg=AmpCfg(
+            amp_reward_coef=0.1,
+            amp_replay_buffer_size=2000000,
+            amp_discr_hidden_dims=[1024, 512],
+            amp_discr_activation="relu",
+            discriminator_lr=1.0e-3,
+            discriminator_optimizer="adam",
+            amp_trunk_weight_decay=1.0e-3,
+            amp_head_weight_decay=1.0e-2,
             grad_pen_coef=10.0,
-            trunk_weight_decay=1e-3,
-            head_weight_decay=1e-1,
-            min_normalized_std=0.05,
+            amp_task_reward_lerp=0.75,
+            amp_state_key="amp_state",
+            motion_loader_class_name="z_lab.tasks.amp.utils.motion_loader:AMPBodyStateMotionLoader",
+            motion_loader_kwargs={
+                "motion_files": G1_AMP_MOTION_DIR,
+                "body_names": tuple(G1_AMP_LINK_NAMES),
+                "anchor_name": G1_ANCHOR_LINK_NAME,
+                "all_body_names": G1_AMP_ALL_BODY_NAMES,
+                "quat_order": "xyzw",
+            },
         ),
     )
-
-
-@configclass
-class G1AmpMoEPPORunnerCfg(G1AmpPPORunnerCfg):
-    """AMP with recovery and MoE actor/critic; the discriminator remains an MLP."""
-
-    experiment_name = "g1_amp_moe"
-    actor = RslRlMoEModelCfg(
-        hidden_dims=[512, 256, 128],
-        activation="elu",
-        obs_normalization=True,
-        num_experts=3,
-        gate_hidden_dims=[],
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
-    )
-    critic = RslRlMoEModelCfg(
-        hidden_dims=[512, 256, 128],
-        activation="elu",
-        obs_normalization=True,
-        num_experts=3,
-        gate_hidden_dims=[],
-    )
-
-
-@configclass
-class G1AmpNoRecoveryPPORunnerCfg(G1AmpPPORunnerCfg):
-    """MLP AMP baseline using only locomotion expert samples."""
-
-    experiment_name = "g1_amp_no_recovery"
-
-    def __post_init__(self) -> None:
-        self.algorithm.amp_cfg.dataset_cfg.recovery_sample_ratio = 0.0

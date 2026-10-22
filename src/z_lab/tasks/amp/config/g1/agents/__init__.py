@@ -1,3 +1,5 @@
-from .rsl_rl_amp_cfg import G1AmpMoEPPORunnerCfg, G1AmpNoRecoveryPPORunnerCfg, G1AmpPPORunnerCfg
+"""AMP agent configurations."""
 
-__all__ = ["G1AmpMoEPPORunnerCfg", "G1AmpNoRecoveryPPORunnerCfg", "G1AmpPPORunnerCfg"]
+from .rsl_rl_amp_cfg import G1AmpPPORunnerCfg
+
+__all__ = ["G1AmpPPORunnerCfg"]

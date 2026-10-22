@@ -1,118 +1,253 @@
-# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
+"""Motion loading and motion-based resets for AMP tasks.
 
-"""Connect motion loading, robot resets, and delayed terminations to environment events."""
+Recorded clips are cached once per motion directory and shared by every environment. Resets sample
+a clip and a frame uniformly, write the root pose/velocity and the joint state, and clamp joint
+positions to the articulation's soft limits.
+
+The NPZ schema is the one written by ``scripts/mimic/csv_to_npz.py``. Bodies and joints are aligned
+by name, so the recorded order does not have to match the simulation order.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 
+from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
-
-from .motion_loader import MotionLoader
-from .terminations import DelayedTerminationManager
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-__all__ = ["init_amp_motion", "init_delayed_termination", "reset_from_amp_motion"]
+__all__ = ["MotionResetManager", "init_motion_loader", "reset_from_motion_data"]
 
-_DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
+_DEFAULT_ASSET_CFG = SceneEntityCfg("robot", joint_names=".*")
 
 
-def init_amp_motion(
+def _as_str_list(values) -> list[str]:
+    return [str(name) for name in np.asarray(values).tolist()]
+
+
+def _index_by_names(available: tuple[str, ...], requested: tuple[str, ...] | list[str], kind: str) -> list[int]:
+    lookup = {name: index for index, name in enumerate(available)}
+    missing = [name for name in requested if name not in lookup]
+    if missing:
+        raise ValueError(f"AMP motion {kind} names {missing} were not found. Available {kind} names: {list(available)}")
+    return [lookup[name] for name in requested]
+
+
+@dataclass
+class _MotionClip:
+    root_pos: torch.Tensor
+    root_quat: torch.Tensor
+    root_lin_vel: torch.Tensor
+    root_ang_vel: torch.Tensor
+    joint_pos: torch.Tensor
+    joint_vel: torch.Tensor
+    joint_names: tuple[str, ...]
+
+    @property
+    def num_frames(self) -> int:
+        return self.root_pos.shape[0]
+
+
+class MotionResetManager:
+    """Cache AMP motion frames and reset environments from sampled frames."""
+
+    _instance: MotionResetManager | None = None
+
+    def __init__(self) -> None:
+        self._frames: dict[str, list[_MotionClip]] = {}
+
+    @classmethod
+    def get(cls) -> MotionResetManager:
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def init(
+        self,
+        motion_dir: str,
+        device: str | torch.device,
+        root_name: str,
+        all_body_names: tuple[str, ...],
+    ) -> None:
+        """Load every clip once for the given motion directory, root, and body layout."""
+        motion_dir = str(Path(motion_dir).expanduser().resolve())
+        if root_name not in all_body_names:
+            raise ValueError(f"AMP root body '{root_name}' is not in all_body_names.")
+        root_index = all_body_names.index(root_name)
+        cache_key = f"{motion_dir}:{root_index}:{tuple(all_body_names)}"
+        if cache_key in self._frames:
+            return
+
+        files = self._collect_motion_files(motion_dir)
+        if not files:
+            raise FileNotFoundError(f"No AMP motion .npz files found in: {motion_dir}")
+        clips: list[_MotionClip] = []
+        for file in files:
+            data = np.load(file)
+            for key in (
+                "body_names",
+                "dof_names",
+                "body_positions",
+                "body_rotations",
+                "body_linear_velocities",
+                "body_angular_velocities",
+                "dof_positions",
+                "dof_velocities",
+            ):
+                if key not in data:
+                    raise KeyError(f"AMP motion file '{file}' is missing key '{key}'.")
+
+            body_positions = torch.as_tensor(data["body_positions"], dtype=torch.float32, device=device)
+            body_rotations = torch.as_tensor(data["body_rotations"], dtype=torch.float32, device=device)
+            body_linear_velocities = torch.as_tensor(data["body_linear_velocities"], dtype=torch.float32, device=device)
+            body_angular_velocities = torch.as_tensor(
+                data["body_angular_velocities"], dtype=torch.float32, device=device
+            )
+            dof_positions = torch.as_tensor(data["dof_positions"], dtype=torch.float32, device=device)
+            dof_velocities = torch.as_tensor(data["dof_velocities"], dtype=torch.float32, device=device)
+
+            motion_body_names = _as_str_list(data["body_names"])
+            if len(motion_body_names) != body_positions.shape[1]:
+                raise ValueError(
+                    f"AMP motion file '{file}' has {len(motion_body_names)} body_names "
+                    f"but body_positions has {body_positions.shape[1]} bodies."
+                )
+            body_indexes = _index_by_names(tuple(motion_body_names), all_body_names, "body")
+            body_positions = body_positions[:, body_indexes]
+            body_rotations = body_rotations[:, body_indexes]
+            body_linear_velocities = body_linear_velocities[:, body_indexes]
+            body_angular_velocities = body_angular_velocities[:, body_indexes]
+
+            joint_names = _as_str_list(data["dof_names"])
+            if len(joint_names) != dof_positions.shape[1]:
+                raise ValueError(
+                    f"AMP motion file '{file}' has {len(joint_names)} dof_names "
+                    f"but dof_positions has {dof_positions.shape[1]} joints."
+                )
+
+            clips.append(
+                _MotionClip(
+                    root_pos=body_positions[:, root_index, :],
+                    root_quat=body_rotations[:, root_index, :],
+                    root_lin_vel=body_linear_velocities[:, root_index, :],
+                    root_ang_vel=body_angular_velocities[:, root_index, :],
+                    joint_pos=dof_positions,
+                    joint_vel=dof_velocities,
+                    joint_names=tuple(joint_names),
+                )
+            )
+
+        self._frames[cache_key] = clips
+
+    def reset(
+        self,
+        env: ManagerBasedRLEnv,
+        env_ids: torch.Tensor | None,
+        motion_dir: str,
+        root_name: str,
+        all_body_names: tuple[str, ...],
+        asset_cfg: SceneEntityCfg,
+    ) -> None:
+        """Write a randomly sampled recorded frame into the selected environments."""
+        motion_dir = str(Path(motion_dir).expanduser().resolve())
+        cache_key = f"{motion_dir}:{all_body_names.index(root_name)}:{tuple(all_body_names)}"
+        if cache_key not in self._frames:
+            self.init(motion_dir, env.device, root_name, all_body_names)
+
+        if env_ids is None:
+            env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
+        elif isinstance(env_ids, slice):
+            env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)[env_ids]
+        else:
+            env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
+        if len(env_ids) == 0:
+            return
+
+        clips = self._frames[cache_key]
+        clip_ids = torch.randint(0, len(clips), (len(env_ids),), device=env.device)
+        frame_ids = torch.zeros_like(clip_ids)
+        for clip_id in clip_ids.unique().tolist():
+            selected = clip_ids == clip_id
+            frame_ids[selected] = torch.randint(
+                clips[clip_id].num_frames, (int(selected.sum().item()),), device=env.device
+            )
+
+        asset: Articulation = env.scene[asset_cfg.name]
+        asset_joint_names = tuple(asset.joint_names)
+        if not asset_joint_names:
+            raise RuntimeError("AMP asset does not expose joint_names for motion alignment.")
+
+        root_pos = torch.empty((len(env_ids), 3), device=env.device, dtype=torch.float32)
+        root_quat = torch.empty((len(env_ids), 4), device=env.device, dtype=torch.float32)
+        root_lin_vel = torch.empty((len(env_ids), 3), device=env.device, dtype=torch.float32)
+        root_ang_vel = torch.empty((len(env_ids), 3), device=env.device, dtype=torch.float32)
+        joint_pos = torch.empty((len(env_ids), len(asset_joint_names)), device=env.device, dtype=torch.float32)
+        joint_vel = torch.empty_like(joint_pos)
+
+        for clip_id in clip_ids.unique().tolist():
+            selected = clip_ids == clip_id
+            clip = clips[clip_id]
+            clip_frame_ids = frame_ids[selected]
+            root_pos[selected] = clip.root_pos[clip_frame_ids]
+            root_quat[selected] = clip.root_quat[clip_frame_ids]
+            root_lin_vel[selected] = clip.root_lin_vel[clip_frame_ids]
+            root_ang_vel[selected] = clip.root_ang_vel[clip_frame_ids]
+
+            clip_joint_pos = clip.joint_pos[clip_frame_ids]
+            clip_joint_vel = clip.joint_vel[clip_frame_ids]
+            joint_indexes = _index_by_names(asset_joint_names, clip.joint_names, "joint")
+            joint_pos[selected] = clip_joint_pos[:, joint_indexes]
+            joint_vel[selected] = clip_joint_vel[:, joint_indexes]
+
+        root_pos = root_pos.clone()
+        root_pos[:, :2] += env.scene.env_origins[env_ids, :2]
+        root_pos[:, 2] += env.scene.env_origins[env_ids, 2]
+        root_pose = torch.cat((root_pos, root_quat), dim=-1)
+        root_velocity = torch.cat((root_lin_vel, root_ang_vel), dim=-1)
+
+        joint_pos = joint_pos[:, asset_cfg.joint_ids]
+        joint_vel = joint_vel[:, asset_cfg.joint_ids]
+        joint_limits = asset.data.soft_joint_pos_limits.torch[env_ids][:, asset_cfg.joint_ids]
+        joint_pos = joint_pos.clamp(joint_limits[..., 0], joint_limits[..., 1])
+
+        asset.write_root_pose_to_sim(root_pose, env_ids=env_ids)
+        asset.write_root_velocity_to_sim(root_velocity, env_ids=env_ids)
+        asset.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=asset_cfg.joint_ids, env_ids=env_ids)
+
+    @staticmethod
+    def _collect_motion_files(motion_dir: str) -> list[Path]:
+        path = Path(motion_dir)
+        if path.is_file() and path.suffix == ".npz":
+            return [path]
+        return sorted(path.rglob("*.npz"))
+
+
+def init_motion_loader(
     env: ManagerBasedRLEnv,
-    env_ids: Sequence[int] | None,
+    env_ids: torch.Tensor | None,
     motion_dir: str,
-    recovery_dir: str | None = None,
-    recovery_name_patterns: Sequence[str] = ("fall", "getup", "get_up", "recovery"),
-    root_name: str | None = None,
+    root_name: str,
+    all_body_names: tuple[str, ...],
+) -> None:
+    """Load AMP motion data during startup."""
+    del env_ids
+    MotionResetManager.get().init(motion_dir, env.device, root_name, all_body_names)
+
+
+def reset_from_motion_data(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor | None,
+    motion_dir: str,
+    root_name: str,
+    all_body_names: tuple[str, ...],
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
-    """Load raw clips at startup and publish ``env.amp_motion_loader``.
-
-    All bodies and joints are aligned to the selected articulation's full simulation order.
-    ``env_ids`` is unused: the loaded pools are shared by all environments on ``env.device``.
-    Expert feature transforms and training datasets are constructed by the training layer.
-    """
-    asset = env.scene[asset_cfg.name]
-    env.amp_motion_loader = MotionLoader(
-        motion_dir=motion_dir,
-        body_names=asset.body_names,
-        joint_names=asset.joint_names,
-        device=env.device,
-        root_name=root_name,
-        recovery_dir=recovery_dir,
-        recovery_name_patterns=recovery_name_patterns,
-    )
-
-
-def init_delayed_termination(
-    env: ManagerBasedRLEnv,
-    env_ids: Sequence[int] | None,
-    delay_reset_env_ratio: float = 0.0,
-    max_delay_steps: int = 0,
-) -> None:
-    """Install a delay manager at startup for a fixed random subset of environments.
-
-    ``delay_reset_env_ratio`` is in ``[0, 1]``. A zero ratio or zero step count disables the
-    delay. The environment's timeout signal always takes priority over the recovery window.
-    ``env_ids`` is unused because the mask is selected once for the entire run.
-    """
-    if not 0.0 <= delay_reset_env_ratio <= 1.0:
-        raise ValueError("delay_reset_env_ratio must be in [0, 1].")
-    if isinstance(max_delay_steps, bool) or not isinstance(max_delay_steps, int) or max_delay_steps < 0:
-        raise ValueError("max_delay_steps must be a nonnegative integer.")
-    num_delay = int(env.num_envs * delay_reset_env_ratio)
-    if num_delay == 0 or max_delay_steps == 0:
-        return
-    delay_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-    delay_mask[torch.randperm(env.num_envs, device=env.device)[:num_delay]] = True
-    env.termination_manager = DelayedTerminationManager(env.termination_manager, delay_mask, max_delay_steps)
-
-
-@torch.no_grad()
-def reset_from_amp_motion(
-    env: ManagerBasedRLEnv,
-    env_ids: Sequence[int] | torch.Tensor | slice | None,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-    use_recovery: bool = True,
-) -> None:
-    """Write a sampled root and joint state to the requested environments.
-
-    Delayed environments use recovery clips when ``use_recovery`` is true; all other environments
-    use normal clips. Missing recovery clips fall back to normal motion. Root positions receive
-    the environment-origin offset; joint positions are clamped to the simulation's soft limits.
-    Both loading and reset must select the same articulation. All its joints are reset in simulation
-    order, regardless of ``asset_cfg.joint_ids``.
-    """
-    loader = getattr(env, "amp_motion_loader", None)
-    if loader is None:
-        raise RuntimeError("reset_from_amp_motion requires init_amp_motion as a startup event.")
-    if env_ids is None or isinstance(env_ids, slice):
-        selector = slice(None) if env_ids is None else env_ids
-        env_ids = torch.arange(env.num_envs, device=env.device)[selector]
-    else:
-        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
-    if env_ids.numel() == 0:
-        return
-
-    manager = env.termination_manager
-    recovery_mask = (
-        manager.delay_env_mask[env_ids] if use_recovery and isinstance(manager, DelayedTerminationManager) else None
-    )
-    state = loader.sample_reset_state(len(env_ids), recovery_mask)
-    asset = env.scene[asset_cfg.name]
-    root_pose = torch.cat([state["root_pos"] + env.scene.env_origins[env_ids], state["root_quat"]], dim=-1)
-    root_velocity = torch.cat([state["root_lin_vel"], state["root_ang_vel"]], dim=-1)
-    limits = asset.data.soft_joint_pos_limits.torch[env_ids]
-    joint_pos = state["dof_pos"].clamp(limits[..., 0], limits[..., 1])
-
-    asset.write_root_pose_to_sim(root_pose, env_ids=env_ids)
-    asset.write_root_velocity_to_sim(root_velocity, env_ids=env_ids)
-    asset.write_joint_state_to_sim(joint_pos, state["dof_vel"], env_ids=env_ids)
+    """Reset selected environments from random AMP motion frames."""
+    MotionResetManager.get().reset(env, env_ids, motion_dir, root_name, all_body_names, asset_cfg)
