@@ -53,17 +53,34 @@ run_train() {
     if [[ ${has_rl_library} -eq 0 ]]; then
         args=(--rl_library rsl_rl "${args[@]}")
     fi
-    uv run python scripts/train.py "${args[@]}"
+    uv run isaaclab train "${args[@]}"
 }
 
 run_play() {
     require_command uv
-    uv run python scripts/play.py "$@"
+    local args=("$@")
+    local has_rl_library=0
+    local has_visualizer=0
+    for arg in "${args[@]}"; do
+        if [[ "${arg}" == "--rl_library" || "${arg}" == --rl_library=* ]]; then
+            has_rl_library=1
+        fi
+        if [[ "${arg}" == "--visualizer" || "${arg}" == --visualizer=* || "${arg}" == "--viz" || "${arg}" == --viz=* ]]; then
+            has_visualizer=1
+        fi
+    done
+    if [[ ${has_rl_library} -eq 0 ]]; then
+        args=(--rl_library rsl_rl "${args[@]}")
+    fi
+    if [[ ${has_visualizer} -eq 0 ]]; then
+        args+=(--visualizer newton_gl)
+    fi
+    uv run isaaclab play "${args[@]}"
 }
 
 list_tasks() {
     require_command uv
-    uv run python scripts/list_envs.py "$@"
+    uv run isaaclab list_envs "$@"
 }
 
 case "${1:-}" in

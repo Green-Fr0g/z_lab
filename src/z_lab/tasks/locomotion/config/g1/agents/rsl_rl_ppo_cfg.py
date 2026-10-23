@@ -7,7 +7,7 @@ from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPp
 class G1LocomtionPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 50000
-    save_interval = 100
+    save_interval = 500
     experiment_name = "g1_locomotion"
     actor = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
