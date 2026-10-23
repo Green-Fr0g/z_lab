@@ -73,11 +73,19 @@ def track_anchor_angular_velocity(
 
 def body_ang_vel_xy_l2(
     env: ManagerBasedRLEnv,
+    std: float,
     body_cfg: SceneEntityCfg = _DEFAULT_BODY_CFG,
 ) -> torch.Tensor:
-    """Penalize squared body-frame angular velocity around the x and y axes."""
+    """Reward low body-frame x/y angular velocity with an exponential term.
+
+    This matches the AMP_mjlab implementation: the selected body's angular
+    velocity is expressed in its body frame, the x/y squared error is scaled
+    by ``std``, and the result is returned as a positive exponential reward.
+    """
     asset: Articulation = env.scene[body_cfg.name]
-    body_quat_w = asset.data.body_link_quat_w.torch[:, body_cfg.body_ids]
-    body_ang_vel_w = asset.data.body_link_ang_vel_w.torch[:, body_cfg.body_ids]
+    body_id = body_cfg.body_ids[0]
+    body_quat_w = asset.data.body_link_quat_w.torch[:, body_id]
+    body_ang_vel_w = asset.data.body_link_ang_vel_w.torch[:, body_id]
     body_ang_vel_b = quat_apply_inverse(body_quat_w, body_ang_vel_w)
-    return torch.sum(torch.square(body_ang_vel_b[..., :2]), dim=-1).sum(dim=-1)
+    ang_vel_xy_error = torch.sum(torch.square(body_ang_vel_b[:, :2]), dim=-1)
+    return torch.exp(-ang_vel_xy_error / std**2)

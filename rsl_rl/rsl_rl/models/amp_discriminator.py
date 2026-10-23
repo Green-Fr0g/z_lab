@@ -62,23 +62,9 @@ class AMPDiscriminator(nn.Module):
         d = self.amp_linear(h)
         return d
 
-    def compute_gradient_penalty(
-        self, expert_state: torch.Tensor, expert_next_state: torch.Tensor, lambda_: float = 10.0
-    ) -> torch.Tensor:
-        """Compute the WGAN-GP gradient penalty on the expert transitions.
-
-        The penalty enforces that the gradient of the discriminator output w.r.t. the
-        expert input has a small norm, promoting smoothness of the discriminator.
-
-        Args:
-            expert_state: Expert states of shape ``(N, state_dim)``.
-            expert_next_state: Expert next states of shape ``(N, state_dim)``.
-            lambda_: Weight of the gradient penalty.
-
-        Returns:
-            The gradient penalty loss.
-        """
-        expert_data = torch.cat([expert_state, expert_next_state], dim=-1)
+    def compute_gradient_penalty(self, expert_data: torch.Tensor, lambda_: float = 10.0) -> torch.Tensor:
+        """Compute GP for the exact expert transition tensor consumed by the discriminator."""
+        expert_data = expert_data.clone()
         expert_data.requires_grad = True
 
         disc = self.amp_linear(self.trunk(expert_data))
@@ -95,10 +81,6 @@ class AMPDiscriminator(nn.Module):
         # Enforce that the gradient norm approaches 0.
         grad_pen = lambda_ * (grad.norm(2, dim=1) - 0).pow(2).mean()
         return grad_pen
-
-    def compute_grad_pen(self, expert_state: torch.Tensor, expert_next_state: torch.Tensor, lambda_: float = 10.0):
-        """Backward-compatible alias for :meth:`compute_gradient_penalty`."""
-        return self.compute_gradient_penalty(expert_state, expert_next_state, lambda_)
 
     @torch.no_grad()
     def reward(

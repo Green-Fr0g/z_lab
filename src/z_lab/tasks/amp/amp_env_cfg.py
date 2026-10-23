@@ -336,7 +336,7 @@ class AmpRewardsCfg:
     body_ang_vel_xy_l2 = RewTerm(
         func=mdp.body_ang_vel_xy_l2,
         weight=0.0,
-        params={"body_cfg": SceneEntityCfg("robot", body_names="")},
+        params={"std": 3.14, "body_cfg": SceneEntityCfg("robot", body_names="")},
     )
 
 
@@ -379,12 +379,3 @@ class AmpEnvCfg(ManagerBasedRLEnvCfg):
         """Disable the interval push event so evaluation is not perturbed."""
         super().play_mode()
         self.events.push_robot = None
-
-    def disable_zero_weight_rewards(self) -> None:
-        """Disable zero-weight reward terms."""
-        for attr in dir(self.rewards):
-            if attr.startswith("__"):
-                continue
-            reward_attr = getattr(self.rewards, attr)
-            if not callable(reward_attr) and reward_attr is not None and reward_attr.weight == 0:
-                setattr(self.rewards, attr, None)

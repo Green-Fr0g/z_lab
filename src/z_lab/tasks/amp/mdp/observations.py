@@ -89,7 +89,11 @@ def robot_body_lin_vel_b(
     """Body linear velocities expressed in each body's own frame, flattened per body."""
     del anchor_cfg
     asset = env.scene[body_cfg.name]
-    body_lin_vel_w = asset.data.body_link_lin_vel_w.torch[:, body_cfg.body_ids]
+    # Match the velocity stored by scripts/mimic/csv_to_npz.py and consumed by
+    # the AMP motion loader.  ``body_lin_vel_w`` is the Isaac Lab body/COM
+    # velocity used by the mimic tracking path; ``body_link_lin_vel_w`` is a
+    # different quantity (the link-origin velocity).
+    body_lin_vel_w = asset.data.body_lin_vel_w.torch[:, body_cfg.body_ids]
     body_quat_w = asset.data.body_link_quat_w.torch[:, body_cfg.body_ids]
     num_bodies = body_lin_vel_w.shape[1]
     body_lin_vel_b = quat_apply_inverse(body_quat_w.reshape(-1, 4), body_lin_vel_w.reshape(-1, 3)).reshape(

@@ -46,7 +46,12 @@ class AMPPPO(PPO):
         )
         self.amp_storage = AMPStorage(self.state_dim, amp_cfg.get("amp_replay_buffer_size", 1000000), device)
         self.amp_normalizer = EmpiricalNormalization(
-            shape=self.state_dim, until=int(amp_cfg.get("normalization_until", 1.0e8))
+            shape=self.state_dim,
+            until=(
+                None
+                if amp_cfg.get("normalization_until") is None
+                else int(amp_cfg["normalization_until"])
+            ),
         ).to(device)
         motion_loader_class_name = amp_cfg.get("motion_loader_class_name")
         if not motion_loader_class_name:
@@ -136,14 +141,14 @@ class AMPPPO(PPO):
                 expert_state_norm = self.amp_normalizer(expert_state)
                 expert_next_state_norm = self.amp_normalizer(expert_next_state)
 
-                policy_d = self.discriminator(torch.cat([policy_state_norm, policy_next_state_norm], dim=-1))
-                expert_d = self.discriminator(torch.cat([expert_state_norm, expert_next_state_norm], dim=-1))
+                policy_input = torch.cat([policy_state_norm, policy_next_state_norm], dim=-1)
+                expert_input = torch.cat([expert_state_norm, expert_next_state_norm], dim=-1)
+                policy_d = self.discriminator(policy_input)
+                expert_d = self.discriminator(expert_input)
                 expert_loss = F.mse_loss(expert_d, torch.ones_like(expert_d))
                 policy_loss = F.mse_loss(policy_d, -torch.ones_like(policy_d))
                 amp_loss = 0.5 * (expert_loss + policy_loss)
-                grad_pen_loss = self.discriminator.compute_gradient_penalty(
-                    expert_state_norm, expert_next_state_norm, lambda_=self.grad_pen_coef
-                )
+                grad_pen_loss = self.discriminator.compute_gradient_penalty(expert_input, lambda_=self.grad_pen_coef)
                 loss = amp_loss + grad_pen_loss
 
                 self.discriminator_optimizer.zero_grad()
@@ -153,9 +158,7 @@ class AMPPPO(PPO):
                 self.discriminator_optimizer.step()
 
                 self.amp_normalizer.update(policy_state.detach())
-                self.amp_normalizer.update(policy_next_state.detach())
                 self.amp_normalizer.update(expert_state.detach())
-                self.amp_normalizer.update(expert_next_state.detach())
 
                 mean_amp_loss += amp_loss.item()
                 mean_grad_pen_loss += grad_pen_loss.item()

@@ -56,7 +56,9 @@ def test_gradient_penalty_is_smooth_and_does_not_leak_gradients_into_inputs():
     expert_state = torch.randn(5, 2)
     expert_next_state = torch.randn(5, 2)
 
-    penalty = discriminator.compute_gradient_penalty(expert_state, expert_next_state, lambda_=10.0)
+    penalty = discriminator.compute_gradient_penalty(
+        torch.cat([expert_state, expert_next_state], dim=-1), lambda_=10.0
+    )
     assert penalty.ndim == 0 and penalty.item() >= 0.0
     penalty.backward()
     assert any(

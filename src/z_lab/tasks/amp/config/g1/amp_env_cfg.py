@@ -26,7 +26,6 @@ G1_AMP_ALL_BODY_NAMES = tuple(G1_BODY_ORDER)
 class UnitreeG1AmpEnvCfg(AmpEnvCfg):
     """G1 velocity-conditioned AMP on flat terrain."""
 
-    base_link_name = "torso_link"
     root_link_name = G1_ROOT_LINK_NAME
     foot_link_name = ".*_ankle_roll_link"
     anchor_body_name = G1_ANCHOR_LINK_NAME
@@ -85,7 +84,7 @@ class UnitreeG1AmpEnvCfg(AmpEnvCfg):
         self.rewards.track_anchor_linear_velocity.params["anchor_cfg"].body_names = self.anchor_body_name
         self.rewards.track_anchor_angular_velocity.weight = 1.0
         self.rewards.track_anchor_angular_velocity.params["anchor_cfg"].body_names = self.anchor_body_name
-        self.rewards.body_ang_vel_xy_l2.weight = -0.5
+        self.rewards.body_ang_vel_xy_l2.weight = 0.5
         self.rewards.body_ang_vel_xy_l2.params["body_cfg"].body_names = "pelvis"
         self.rewards.ang_vel_xy_l2.weight = -0.1
         self.rewards.base_height_l2.weight = -5.0
@@ -95,7 +94,7 @@ class UnitreeG1AmpEnvCfg(AmpEnvCfg):
         self.rewards.feet_slide.weight = -0.2
         self.rewards.undesired_contacts.weight = -1.0
 
-        self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
+        self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.anchor_body_name]
         self.rewards.base_height_l2.params["target_height"] = 0.78
         self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = list(self.joint_names)
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
@@ -103,8 +102,6 @@ class UnitreeG1AmpEnvCfg(AmpEnvCfg):
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = ["(?!.*ankle_roll).*"]
 
         # ------------------------------ terminations ------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.anchor_body_name]
         self.terminations.base_height.params["minimum_height"] = 0.2
         self.terminations.bad_orientation.params["limit_angle"] = 0.7
-
-        self.disable_zero_weight_rewards()
