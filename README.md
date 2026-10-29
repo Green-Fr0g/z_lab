@@ -24,7 +24,7 @@
 2. 使用 Python 3.12 创建项目的 `.venv` 虚拟环境。
 3. 执行 `uv sync --extra rsl-rl`，安装项目和 Isaac Lab 依赖。
 
-`pyproject.toml` 中的 `[tool.uv.sources]` 使用了相对于本项目的 Isaac Lab 源码路径。如果 Isaac Lab 目录位置发生变化，需要同步修改这些路径。安装完成后不需要手动激活虚拟环境，脚本会通过 `uv run` 使用项目环境。
+`pyproject.toml` 使用官方发布的 `isaaclab==3.0.0` 安装包，包含所需的 Isaac Lab 子模块。安装只需本项目，无需额外克隆 IsaacLab 仓库，也不依赖项目外的本地源码目录；首次安装需要联网下载 Python 依赖和 Git LFS 资产。依赖版本由 `uv.lock` 锁定。安装完成后不需要手动激活虚拟环境，脚本会通过 `uv run` 使用项目环境。
 
 项目会转发 Isaac Lab 提供的可选依赖，包括 Isaac Sim、物理后端、渲染、可视化、强化学习和开发工具等。根据使用场景选择相应的 extra，例如：
 
@@ -143,7 +143,7 @@ uv run pytest
 uv run pre-commit run --all-files
 ```
 
-项目中的 `pyrightconfig.json` 已包含项目 `src` 目录和 Isaac Lab 源码目录，VS Code/Pylance 或 Cursor/basedpyright 可以直接跳转到上游实现。需要配置编辑器环境时运行：
+VS Code/Pylance 或 Cursor/basedpyright 应使用项目的 `.venv` 解释器。需要根据已安装的依赖生成编辑器配置时运行：
 
 ```bash
 uv run isaaclab --editor

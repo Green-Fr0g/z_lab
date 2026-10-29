@@ -18,35 +18,41 @@ authors = [
 ]
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "isaaclab-dev[rsl-rl]",
+    "isaaclab[rsl-rl]==3.0.0",
 ]
 
 [project.entry-points."isaaclab.tasks"]
 z_lab = "z_lab.tasks"
 
 [project.optional-dependencies]
-all = ["isaaclab-dev[all]"]
-dev = ["isaaclab-dev[dev]"]
-importers = ["isaaclab-dev[importers]"]
-isaacsim = ["isaaclab-dev[isaacsim]"]
-leapp = ["isaaclab-dev[leapp]"]
-mimic = ["isaaclab-dev[mimic]"]
-ov = ["isaaclab-dev[ov]"]
-ovphysx = ["isaaclab-dev[ovphysx]"]
-ovrtx = ["isaaclab-dev[ovrtx]"]
-rerun = ["isaaclab-dev[rerun]"]
-rl-games = ["isaaclab-dev[rl-games]"]
-rlinf = ["isaaclab-dev[rlinf]"]
-rsl-rl = ["isaaclab-dev[rsl-rl]"]
-sb3 = ["isaaclab-dev[sb3]"]
-skrl = ["isaaclab-dev[skrl]"]
-teleop = ["isaaclab-dev[teleop]"]
-test = ["isaaclab-dev[test]"]
-tetrahedralization = ["isaaclab-dev[tetrahedralization]"]
-torchrl = ["isaaclab-dev[torchrl]"]
-video = ["isaaclab-dev[video]"]
-viser = ["isaaclab-dev[viser]"]
-wandb = ["isaaclab-dev[wandb]"]
+all = ["isaaclab[all]==3.0.0"]
+dev = ["isaaclab[dev]==3.0.0"]
+importers = ["isaaclab[importers]==3.0.0"]
+isaacsim = ["isaaclab[isaacsim]==3.0.0"]
+leapp = ["isaaclab[leapp]==3.0.0"]
+mimic = ["isaaclab[mimic]==3.0.0"]
+ov = ["isaaclab[ov]==3.0.0"]
+ovphysx = ["isaaclab[ovphysx]==3.0.0"]
+ovrtx = ["isaaclab[ovrtx]==3.0.0"]
+rerun = ["isaaclab[rerun]==3.0.0"]
+# RL-Games is not included in the published Isaac Lab extras.
+rl-games = [
+    "aiohttp>=3.14.1",
+    "rl-games @ git+https://github.com/isaac-sim/rl_games.git@5cf4f9ff07e9a01bbefd167cf19b6804b294b51c",
+    "gym",
+    "standard-distutils",
+]
+rlinf = ["isaaclab[rlinf]==3.0.0"]
+rsl-rl = ["isaaclab[rsl-rl]==3.0.0"]
+sb3 = ["isaaclab[sb3]==3.0.0"]
+skrl = ["isaaclab[skrl]==3.0.0"]
+teleop = ["isaaclab[teleop]==3.0.0"]
+test = ["isaaclab[test]==3.0.0"]
+tetrahedralization = ["isaaclab[tetrahedralization]==3.0.0"]
+torchrl = ["isaaclab[torchrl]==3.0.0"]
+video = ["isaaclab[video]==3.0.0"]
+viser = ["isaaclab[viser]==3.0.0"]
+wandb = ["isaaclab[wandb]==3.0.0"]
 
 [dependency-groups]
 dev = ["codespell>=2.4", "pre-commit>=4.2", "pytest>=8.3", "ruff>=0.11"]
@@ -59,35 +65,23 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
+# Match the resolver overrides shipped with the Isaac Lab 3.0.0 wheel.
 override-dependencies = [
     "numpy>=2",
     "mujoco~=3.12.0",
     "mujoco-warp~=3.12.0",
     "newton[sim]==1.6.1",
     "newton-usd-schemas>=0.5.0",
-    "usd-exchange==3.0.0",
-    "usd-optimize~=1.3.0",
-    "torch==2.12.0",
-    "torchvision==0.27.0",
+    "usd-exchange==3.0.1",
+    "usd-optimize~=1.3.1",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "fsspec>=2026.6.0",
     "packaging>=20,<27",
+    "urllib3>=2.8.0",
 ]
 
 [tool.uv.sources]
-"isaaclab" = { path = "../IsaacLab/source/isaaclab", editable = true }
-"isaaclab-assets" = { path = "../IsaacLab/source/isaaclab_assets", editable = true }
-"isaaclab-contrib" = { path = "../IsaacLab/source/isaaclab_contrib", editable = true }
-"isaaclab-dev" = { path = "../IsaacLab", editable = true }
-"isaaclab-experimental" = { path = "../IsaacLab/source/isaaclab_experimental", editable = true }
-"isaaclab-mimic" = { path = "../IsaacLab/source/isaaclab_mimic", editable = true }
-"isaaclab-newton" = { path = "../IsaacLab/source/isaaclab_newton", editable = true }
-"isaaclab-ov" = { path = "../IsaacLab/source/isaaclab_ov", editable = true }
-"isaaclab-physx" = { path = "../IsaacLab/source/isaaclab_physx", editable = true }
-"isaaclab-ppisp" = { path = "../IsaacLab/source/isaaclab_ppisp", editable = true }
-"isaaclab-rl" = { path = "../IsaacLab/source/isaaclab_rl", editable = true }
-"isaaclab-tasks" = { path = "../IsaacLab/source/isaaclab_tasks", editable = true }
-"isaaclab-tasks-experimental" = { path = "../IsaacLab/source/isaaclab_tasks_experimental", editable = true }
-"isaaclab-teleop" = { path = "../IsaacLab/source/isaaclab_teleop", editable = true }
-"isaaclab-visualizers" = { path = "../IsaacLab/source/isaaclab_visualizers", editable = true }
 "omniverseclient" = { index = "pypi-public" }
 "ovphysx" = { index = "pypi-public" }
 "ovrtx" = { index = "pypi-public" }
