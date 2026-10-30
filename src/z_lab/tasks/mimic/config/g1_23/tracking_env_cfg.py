@@ -51,7 +51,13 @@ class G1_23DOFMimicEnvCfg(TrackingEnvCfg):
         self.commands.motion.motion_file = str(MOTION_FILE)
         self.commands.motion.anchor_body_name = self.anchor_body_name
         self.commands.motion.body_names = self.body_names
+        self.commands.motion.joint_names = list(G1_23DOF_DOF_ORDER)
         self.events.add_joint_default_pos.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+
+        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
 
         self.rewards.motion_global_anchor_pos.weight = 0.5
         self.rewards.motion_global_anchor_ori.weight = 0.5

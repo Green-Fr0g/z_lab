@@ -102,7 +102,9 @@ class CommandsCfg:
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
+    joint_pos = mdp.JointPositionActionCfg(
+        asset_name="robot", joint_names=[".*"], preserve_order=True, use_default_offset=True
+    )
 
 
 @configclass
@@ -128,9 +130,17 @@ class ObservationsCfg:
 
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
 
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
+        joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"], preserve_order=True)},
+            noise=Unoise(n_min=-0.01, n_max=0.01),
+        )
 
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5))
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"], preserve_order=True)},
+            noise=Unoise(n_min=-0.5, n_max=0.5),
+        )
 
         actions = ObsTerm(func=mdp.last_action)
 
@@ -154,9 +164,15 @@ class ObservationsCfg:
 
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
 
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
+        joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"], preserve_order=True)},
+        )
 
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"], preserve_order=True)},
+        )
 
         actions = ObsTerm(func=mdp.last_action)
 
@@ -190,7 +206,7 @@ class EventCfg:
         func=mdp.randomize_joint_default_pos,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"], preserve_order=True),
             "pos_distribution_params": (-0.01, 0.01),
             "operation": "add",
         },
@@ -202,6 +218,7 @@ class EventCfg:
         mode="interval",
         interval_range_s=(1.0, 3.0),
         params={
+            "asset_cfg": SceneEntityCfg("robot"),
             "velocity_range": {
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),
@@ -341,12 +358,6 @@ class TrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.eye = (1.5, 1.5, 1.5)
         self.viewer.origin_type = "asset_root"
         self.viewer.asset_name = "robot"
-
-        # Keep playback deterministic and prevent disturbances from changing the reference tracking.
-        self.events.physics_material = None
-        self.events.add_joint_default_pos = None
-        self.events.push_robot = None
-
 
     def play_mode(self):
         super().play_mode()

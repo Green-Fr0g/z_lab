@@ -1,8 +1,6 @@
-from isaaclab.sensors import RayCasterCfg, patterns
 from isaaclab.utils import configclass
 
 from z_lab.assets.robots.dr02 import DR02_ANCHOR_LINK_NAME, DR02_CFG, DR02_DOF_ORDER
-
 from z_lab.tasks.locomotion import mdp
 from z_lab.tasks.locomotion.locomotion_env_cfg import LocomotionEnvCfg
 
@@ -23,6 +21,12 @@ class DR02VelocityEnvCfg(LocomotionEnvCfg):
 
         # ------------------------------actions------------------------------
         self.actions.joint_position.joint_names = list(DR02_DOF_ORDER)
+
+        # ------------------------------observations------------------------------
+        self.observations.policy.joint_pos_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.policy.joint_vel_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.critic.joint_pos_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.critic.joint_vel_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
 
         # ------------------------------rewards------------------------------
 

@@ -122,6 +122,8 @@ class MotionCommand(CommandTerm):
 
         self.motion = MotionLoader(self.cfg.motion_file, body_names=self.cfg.body_names, device=self.device)
         self._align_motion_joints_to_robot()
+        joint_indexes = self.robot.find_joints(self.cfg.joint_names, preserve_order=True)[0]
+        self.joint_indexes = torch.as_tensor(_value(joint_indexes), dtype=torch.long, device=self.device)
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
@@ -167,8 +169,9 @@ class MotionCommand(CommandTerm):
         self.motion.joint_names = list(self.robot.joint_names)
 
     @property
-    def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
-        return torch.cat([self.joint_pos, self.joint_vel], dim=1)
+    def command(self) -> torch.Tensor:
+        """Reference joint positions and velocities in the configured policy joint order."""
+        return torch.cat([self.joint_pos[:, self.joint_indexes], self.joint_vel[:, self.joint_indexes]], dim=1)
 
     @property
     def joint_pos(self) -> torch.Tensor:
@@ -433,6 +436,11 @@ class MotionCommandCfg(CommandTermCfg):
     motion_file: str = MISSING
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
+    joint_names: list[str] = [".*"]
+    """Joint names or patterns selecting the command observation, in policy order.
+
+    Motion data used for simulation resets and metrics retains the full robot joint order.
+    """
 
     pose_range: dict[str, tuple[float, float]] = {}
     velocity_range: dict[str, tuple[float, float]] = {}

@@ -1,15 +1,13 @@
-from isaaclab.sensors import RayCasterCfg, patterns
 from isaaclab.utils import configclass
 
-from z_lab.assets.robots.g1 import G1_CFG, G1_DOF_ORDER,G1_ROOT_LINK_NAME
-
+from z_lab.assets.robots.g1 import G1_CFG, G1_DOF_ORDER, G1_ROOT_LINK_NAME
 from z_lab.tasks.locomotion import mdp
 from z_lab.tasks.locomotion.locomotion_env_cfg import LocomotionEnvCfg
 
 
 @configclass
 class UnitreeG1VelocityEnvCfg(LocomotionEnvCfg):
-    arm_joints = [".*_shoulder_.*_joint",".*_elbow_joint",".*_wrist_.*"]
+    arm_joints = [".*_shoulder_.*_joint", ".*_elbow_joint", ".*_wrist_.*"]
     waist_joints = ["waist.*"]
     hip_joints = [".*_hip_roll_joint", ".*_hip_yaw_joint"]
     foot_links = [".*ankle_roll.*"]
@@ -22,15 +20,21 @@ class UnitreeG1VelocityEnvCfg(LocomotionEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + G1_ROOT_LINK_NAME
 
         # ------------------------------actions------------------------------
-        self.actions.joint_position.joint_names=list(G1_DOF_ORDER)
+        self.actions.joint_position.joint_names = list(G1_DOF_ORDER)
+
+        # ------------------------------observations------------------------------
+        self.observations.policy.joint_pos_rel.params["asset_cfg"].joint_names = list(G1_DOF_ORDER)
+        self.observations.policy.joint_vel_rel.params["asset_cfg"].joint_names = list(G1_DOF_ORDER)
+        self.observations.critic.joint_pos_rel.params["asset_cfg"].joint_names = list(G1_DOF_ORDER)
+        self.observations.critic.joint_vel_rel.params["asset_cfg"].joint_names = list(G1_DOF_ORDER)
 
         # ------------------------------rewards------------------------------
 
-        #track related
+        # track related
         self.rewards.track_lin_vel_xy.weight = 1.0
         self.rewards.track_ang_vel_z.weight = 0.8
 
-        #root related
+        # root related
         self.rewards.base_height.weight = -10.0
         self.rewards.base_height.params["target_height"] = 0.78
         self.rewards.flat_orientation_l2.weight = -5.0
@@ -39,7 +43,7 @@ class UnitreeG1VelocityEnvCfg(LocomotionEnvCfg):
         self.rewards.base_angular_velocity.weight = -0.05
         self.rewards.energy.weight = -2e-5
 
-        #joint related
+        # joint related
         self.rewards.joint_vel.weight = -0.001
         self.rewards.joint_acc.weight = -2.5e-7
         self.rewards.action_rate.weight = -0.05
@@ -48,7 +52,7 @@ class UnitreeG1VelocityEnvCfg(LocomotionEnvCfg):
         self.rewards.joint_deviation_waists.weight = -1.0
         self.rewards.joint_deviation_legs.weight = -0.8
 
-        #feet related
+        # feet related
         self.rewards.gait.weight = 0.5
         self.rewards.feet_slide.weight = -0.2
         self.rewards.feet_clearance.weight = 1.0

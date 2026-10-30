@@ -1,8 +1,6 @@
-from isaaclab.sensors import RayCasterCfg, patterns
 from isaaclab.utils import configclass
 
 from z_lab.assets.robots.g1_23 import G1_23DOF_CFG, G1_23DOF_DOF_ORDER, G1_23DOF_ROOT_LINK_NAME
-
 from z_lab.tasks.locomotion import mdp
 from z_lab.tasks.locomotion.locomotion_env_cfg import LocomotionEnvCfg
 
@@ -23,6 +21,12 @@ class UnitreeG123VelocityEnvCfg(LocomotionEnvCfg):
 
         # ------------------------------actions------------------------------
         self.actions.joint_position.joint_names = list(G1_23DOF_DOF_ORDER)
+
+        # ------------------------------observations------------------------------
+        self.observations.policy.joint_pos_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.policy.joint_vel_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.critic.joint_pos_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.critic.joint_vel_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
 
         # ------------------------------rewards------------------------------
 
@@ -74,4 +78,3 @@ class UnitreeG123VelocityEnvCfg(LocomotionEnvCfg):
 
         self.scene.terrain.terrain_type = "plane"
         self.curriculum.terrain_levels = None
-

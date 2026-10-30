@@ -5,24 +5,26 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 import isaaclab.utils.math as math_utils
-from isaaclab.assets import Articulation
 from isaaclab.envs.mdp.events import _randomize_prop_by_op
 from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
+    from isaaclab.assets import Articulation
     from isaaclab.envs import ManagerBasedEnv
 
 
 def randomize_joint_default_pos(
     env: ManagerBasedEnv,
-    env_ids: torch.Tensor | None,
+    env_ids: torch.Tensor | slice | None,
     asset_cfg: SceneEntityCfg,
     pos_distribution_params: tuple[float, float] | None = None,
     operation: Literal["add", "scale", "abs"] = "abs",
     distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
-):
-    """
-    Randomize the joint default positions which may be different from URDF due to calibration errors.
+) -> None:
+    """Randomize selected joint zero positions and synchronize the joint-position action offset.
+
+    Robot joint indices select the default positions; the action term's own joint indices
+    select and order its offsets. Joints outside the action set remain valid event targets.
     """
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
@@ -33,29 +35,31 @@ def randomize_joint_default_pos(
         if hasattr(asset.data.default_joint_pos, "torch")
         else asset.data.default_joint_pos
     )
-    asset.data.default_joint_pos_nominal = torch.clone(default_joint_pos[0])
+    if not hasattr(asset.data, "default_joint_pos_nominal"):
+        asset.data.default_joint_pos_nominal = default_joint_pos[0].clone()
 
     # resolve environment ids
     if env_ids is None:
-        env_ids = torch.arange(env.scene.num_envs, device=asset.device)
+        env_ids = slice(None)
+    elif not isinstance(env_ids, slice):
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=asset.device)
 
     # resolve joint indices
-    if asset_cfg.joint_ids == slice(None):
-        joint_ids = slice(None)  # for optimization purposes
-    else:
-        joint_ids = torch.tensor(asset_cfg.joint_ids, dtype=torch.int, device=asset.device)
+    joint_ids = asset_cfg.joint_ids
+    if not isinstance(joint_ids, slice):
+        joint_ids = torch.as_tensor(joint_ids, dtype=torch.long, device=asset.device)
 
     if pos_distribution_params is not None:
-        pos = default_joint_pos.to(asset.device).clone()
-        pos = _randomize_prop_by_op(
-            pos, pos_distribution_params, env_ids, joint_ids, operation=operation, distribution=distribution
-        )[env_ids][:, joint_ids]
-
-        if not isinstance(env_ids, slice) and not isinstance(joint_ids, slice):
-            env_ids = env_ids[:, None]
-        default_joint_pos[env_ids, joint_ids] = pos
-        # update the offset in action since it is not updated automatically
-        env.action_manager.get_term("joint_pos")._offset[env_ids, joint_ids] = pos
+        _randomize_prop_by_op(
+            default_joint_pos,
+            pos_distribution_params,
+            env_ids,
+            joint_ids,
+            operation=operation,
+            distribution=distribution,
+        )
+        action_term = env.action_manager.get_term("joint_pos")
+        action_term._offset[env_ids] = default_joint_pos[env_ids][:, action_term._joint_ids]
 
 
 def randomize_rigid_body_com(

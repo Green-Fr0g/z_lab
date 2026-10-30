@@ -51,10 +51,13 @@ class DR02MimicEnvCfg(TrackingEnvCfg):
         self.commands.motion.motion_file = str(MOTION_FILE)
         self.commands.motion.anchor_body_name = self.anchor_body_name
         self.commands.motion.body_names = self.body_names
-        # The USD also contains two neck joints which are not policy actuators; the
-        # generic default-position randomizer indexes action-local offsets, so it
-        # cannot be applied to this partial action set.
-        self.events.add_joint_default_pos = None
+        self.commands.motion.joint_names = list(DR02_DOF_ORDER)
+        self.events.add_joint_default_pos.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+
+        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
 
         self.rewards.motion_global_anchor_pos.weight = 0.5
         self.rewards.motion_global_anchor_ori.weight = 0.5
