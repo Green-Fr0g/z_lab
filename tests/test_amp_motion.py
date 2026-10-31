@@ -20,14 +20,14 @@ def _write_clip(path, value, fps=50):
         fps=[fps],
         robot_name=["g1"],
         body_names=np.array(["hand", "root"]),
-        dof_names=np.array(["elbow", "hip"]),
+        dof_names=np.array(["elbow", "knee", "hip"]),
         root_link_name=["root"],
         body_positions=np.array([[[99.0, 0.0, 0.0], [value, 0.0, 0.8]]], dtype=np.float32),
         body_rotations=np.array([[[0.0, 0.0, 0.0, 1.0]] * 2], dtype=np.float32),
         body_linear_velocities=np.array([[[9.0, 0.0, 0.0], [value + 1, 0.0, 0.0]]], dtype=np.float32),
         body_angular_velocities=np.array([[[8.0, 0.0, 0.0], [0.0, 0.0, value + 2]]], dtype=np.float32),
-        dof_positions=np.array([[0.5, value]], dtype=np.float32),
-        dof_velocities=np.array([[5.0, value + 3]], dtype=np.float32),
+        dof_positions=np.array([[0.5, -0.75, value]], dtype=np.float32),
+        dof_velocities=np.array([[5.0, -6.0, value + 3]], dtype=np.float32),
     )
 
 
@@ -37,8 +37,8 @@ class _Scene(dict):
 
 def _env(writes):
     asset = SimpleNamespace(
-        joint_names=["hip", "elbow"],
-        data=SimpleNamespace(soft_joint_pos_limits=SimpleNamespace(torch=torch.tensor([[[-1.5, 1.5]] * 2] * 3))),
+        joint_names=["hip", "elbow", "knee"],
+        data=SimpleNamespace(soft_joint_pos_limits=SimpleNamespace(torch=torch.tensor([[[-1.5, 1.5]] * 3] * 3))),
         write_root_pose_to_sim=lambda value, env_ids: writes.update(pose=value, pose_ids=env_ids),
         write_root_velocity_to_sim=lambda value, env_ids: writes.update(velocity=value),
         write_joint_state_to_sim=lambda pos, vel, joint_ids, env_ids: writes.update(pos=pos, vel=vel),
@@ -49,7 +49,7 @@ def _env(writes):
 
 
 def test_motion_name_alignment_and_reset_write(tmp_path):
-    """Body/joint order is resolved by name, so the recorded layout does not leak into the sim."""
+    """Reset aligns body names and a three-joint cycle whose permutation differs from its inverse."""
     _write_clip(tmp_path / "walk.npz", 1.0)
     writes = {}
     env = _env(writes)
@@ -69,8 +69,8 @@ def test_motion_name_alignment_and_reset_write(tmp_path):
     torch.testing.assert_close(writes["pose"][:, :3], torch.tensor([[31.0, 0.0, 0.8], [11.0, 0.0, 0.8]]))
     torch.testing.assert_close(writes["velocity"], torch.tensor([[2.0, 0.0, 0.0, 0.0, 0.0, 3.0]] * 2))
     # Joints follow the articulation order instead of the recorded order.
-    torch.testing.assert_close(writes["pos"], torch.tensor([[1.0, 0.5]] * 2))
-    torch.testing.assert_close(writes["vel"], torch.tensor([[4.0, 5.0]] * 2))
+    torch.testing.assert_close(writes["pos"], torch.tensor([[1.0, 0.5, -0.75]] * 2))
+    torch.testing.assert_close(writes["vel"], torch.tensor([[4.0, 5.0, -6.0]] * 2))
 
 
 def test_clip_boundaries_are_preserved_across_files(tmp_path):

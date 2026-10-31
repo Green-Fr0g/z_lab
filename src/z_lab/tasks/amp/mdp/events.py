@@ -202,7 +202,7 @@ class MotionResetManager:
 
             clip_joint_pos = clip.joint_pos[clip_frame_ids]
             clip_joint_vel = clip.joint_vel[clip_frame_ids]
-            joint_indexes = _index_by_names(asset_joint_names, clip.joint_names, "joint")
+            joint_indexes = _index_by_names(clip.joint_names, asset_joint_names, "joint")
             joint_pos[selected] = clip_joint_pos[:, joint_indexes]
             joint_vel[selected] = clip_joint_vel[:, joint_indexes]
 
