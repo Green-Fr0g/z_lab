@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rsl-rl-lib"
+version = "5.5.1"
+description = "RSL-RL 5.5.1 with AMP-PPO support for z_lab"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.6.0",
+    "tensordict>=0.7.0",
+    "numpy>=1.16.4",
+    "tensorboard",
+    "GitPython",
+    "onnx",
+    "onnxscript>=0.5.4",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+wandb = ["wandb"]
+neptune = ["neptune"]
+
+# Keep the existing layout: this directory is both the project root and the Python package.
+[tool.setuptools]
+package-dir = { "rsl_rl" = "." }
+packages = [
+    "rsl_rl",
+    "rsl_rl.algorithms",
+    "rsl_rl.env",
+    "rsl_rl.extensions",
+    "rsl_rl.models",
+    "rsl_rl.modules",
+    "rsl_rl.runners",
+    "rsl_rl.storage",
+    "rsl_rl.utils",
+]

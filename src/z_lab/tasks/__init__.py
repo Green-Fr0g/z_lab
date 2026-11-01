@@ -10,6 +10,7 @@ from isaaclab_tasks.utils import import_packages
 
 import_packages(__name__, ["utils", ".mdp"])
 from . import (
+    amp,
     locomotion,
     mimic,
 )  # noqa: E402,F401

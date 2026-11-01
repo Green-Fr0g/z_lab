@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 # z_lab 统一入口脚本。
-# -i/--install: 初始化 Git LFS、拉取大文件、创建 uv 虚拟环境并安装依赖
+# -i/--install: 初始化 Git LFS、拉取大文件、创建 uv 虚拟环境并安装依赖和本地 rsl_rl
+# --install-rsl-rl: 在项目虚拟环境中安装本地可编辑版 rsl_rl
 # -l/--list:    列出已注册任务
 # -t/--train:   使用 rsl_rl 运行训练
 # -p/--play:    运行策略回放
@@ -18,6 +19,23 @@ die() {
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "找不到命令 '$1'，请先安装后重试。"
+}
+
+install_rsl_rl() {
+    require_command uv
+    [[ -x "${Z_LAB_PATH}/.venv/bin/python" ]] || die "项目虚拟环境不存在，请先执行 ./z_lab.sh -i。"
+
+    echo "[信息] 安装本地 rsl_rl（editable，5.5.1 + AMP）。"
+    uv pip install --python "${Z_LAB_PATH}/.venv/bin/python" --no-deps --editable "${Z_LAB_PATH}/src/rsl_rl"
+    "${Z_LAB_PATH}/.venv/bin/python" - <<'PY'
+from importlib.metadata import version
+
+import rsl_rl
+from rsl_rl.algorithms import AMPPPO
+
+print(f"[信息] rsl_rl {version('rsl-rl-lib')}: {rsl_rl.__file__}")
+print(f"[信息] AMP 算法: {AMPPPO.__module__}.{AMPPPO.__name__}")
+PY
 }
 
 install_project() {
@@ -37,6 +55,7 @@ install_project() {
 
     echo "[信息] 同步项目依赖。"
     uv sync --extra rsl-rl
+    install_rsl_rl
     echo "[完成] z_lab 安装完成。"
 }
 
@@ -88,6 +107,10 @@ case "${1:-}" in
         shift
         install_project "$@"
         ;;
+    --install-rsl-rl)
+        shift
+        install_rsl_rl "$@"
+        ;;
     -t|--train)
         shift
         run_train "$@"
@@ -103,13 +126,15 @@ case "${1:-}" in
     -h|--help|"")
         cat <<'EOF'
 用法：
-  ./z_lab.sh -i                         初始化环境并拉取 Git LFS 资产
+  ./z_lab.sh -i                         初始化环境、拉取资产并安装本地 rsl_rl
+  ./z_lab.sh --install-rsl-rl            单独安装本地可编辑版 rsl_rl
   ./z_lab.sh -l                         列出已注册训练任务
   ./z_lab.sh -t --task <任务名称>        使用 rsl_rl 训练
   ./z_lab.sh -p --task <任务名称>        播放已训练策略
 
 示例：
   ./z_lab.sh -i
+  ./z_lab.sh --install-rsl-rl
   ./z_lab.sh -t --task ZLab-Velocity-Unitree-G1
   ./z_lab.sh -p --task ZLab-Velocity-Unitree-G1 --checkpoint <检查点路径>
 

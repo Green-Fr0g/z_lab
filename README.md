@@ -8,6 +8,8 @@
 - `ZLab-Velocity-Unitree-G1-23DOF`：Unitree G1，23 个策略自由度。
 - `ZLab-Velocity-DR02`：DR02，29 个策略自由度。
 
+另外注册了 `ZLab-AMP-Unitree-G1-23DOF`，使用本地 RSL-RL 5.5.1 的 AMP-PPO 算法，支持动作初始化和倒地恢复。
+
 机器人资产使用 Isaac Lab 的隐式关节执行器。每个机器人的关节顺序、动作缩放、连杆名称、执行器参数和 USD 路径保存在 `src/z_lab/assets/robots` 中。
 
 ## 安装
@@ -23,6 +25,13 @@
 1. 初始化 Git LFS 并执行 `git lfs pull`，拉取 USD、模型和其他大文件。
 2. 使用 Python 3.12 创建项目的 `.venv` 虚拟环境。
 3. 执行 `uv sync --extra rsl-rl`，安装项目和 Isaac Lab 依赖。
+4. 将 `src/rsl_rl` 中的 RSL-RL 5.5.1 + AMP 以 editable 方式安装，并检查 AMP 算法入口。
+
+已有项目环境时，可以单独安装本地 RSL-RL：
+
+```bash
+./z_lab.sh --install-rsl-rl
+```
 
 `pyproject.toml` 使用官方发布的 `isaaclab==3.0.0` 安装包，包含所需的 Isaac Lab 子模块。安装只需本项目，无需额外克隆 IsaacLab 仓库，也不依赖项目外的本地源码目录；首次安装需要联网下载 Python 依赖和 Git LFS 资产。依赖版本由 `uv.lock` 锁定。安装完成后不需要手动激活虚拟环境，脚本会通过 `uv run` 使用项目环境。
 
@@ -86,6 +95,27 @@ uv run isaaclab benchmark training --rl_library rsl_rl --task <任务名称> --m
 ```
 
 可以使用 `physics=<预设名称>` 选择 `isaaclab list_envs --show_presets` 输出的物理后端预设。
+
+### G1_23 AMP 训练
+
+训练前，将 CSV 转换为 50 Hz、xyzw 四元数的 NPZ 数据，输出到任务的 `motions` 目录：
+
+```bash
+uv run python scripts/mimic/config_csv_to_npz.py \
+  --config src/z_lab/assets/data/motions/config/g1_23_amp.yaml \
+  --output_dir src/z_lab/tasks/amp/config/g1_23/motions \
+  --output_fps 50 --physics newton_mjwarp --visual none
+```
+
+任务使用的恢复片段名称为 `fallAndGetUp1_subject1_frames409_1948_g1_23.npz`。批量转换脚本默认沿用 CSV 文件名；若生成的恢复片段不带 `_g1_23` 后缀，需要在训练前将其重命名为上述名称。恢复片段只用于恢复环境初始化，不参与判别器的专家采样。
+
+```bash
+./z_lab.sh -t --task ZLab-AMP-Unitree-G1-23DOF physics=newton_mjwarp
+```
+
+速度命令的采样上下界在 120,000 个全局控制步内，由 `ranges` 线性扩展到 `limit_ranges`，随后保持不变；每次重置更新范围，命令在当前范围内均匀重采样。当前每轮 rollout 为 24 步，约 5,000 轮达到上限。恢复环境的 pelvis 辅助力从 200 N 向世界坐标 +Z 施加，在同样的控制步数内线性衰减到 0。
+
+检查点保存策略、价值网络、判别器、归一化统计和 optimizer；当前不恢复环境的全局控制步计数，因此恢复训练会重新开始速度课程和辅助力衰减。
 
 ## 项目结构
 
