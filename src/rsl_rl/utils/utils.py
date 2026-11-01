@@ -235,8 +235,7 @@ def resolve_obs_groups(
     if len(obs_groups) == 0:
         warnings.warn(
             "The observation configuration dictionary 'obs_groups' is empty and thus likely not configured. Consider"
-            " configuring the 'obs_groups' dictionary explicitly",
-            stacklevel=2,
+            " configuring the 'obs_groups' dictionary explicitly"
         )
     else:
         # Check all observation sets for valid observation groups
@@ -261,8 +260,7 @@ def resolve_obs_groups(
                     f"The observation configuration dictionary 'obs_groups' does not contain the '{default_set_name}'"
                     f" key. As an observation group with the name '{default_set_name}' was found, this is assumed to be"
                     f" the appropriate observation. Consider adding the '{default_set_name}' key to the 'obs_groups'"
-                    f" dictionary for clarity. This behavior will be removed in a future version.",
-                    stacklevel=2,
+                    f" dictionary for clarity. This behavior will be removed in a future version."
                 )
             elif "policy" in obs:
                 obs_groups[default_set_name] = ["policy"]
@@ -270,8 +268,7 @@ def resolve_obs_groups(
                     f"The observation configuration dictionary 'obs_groups' does not contain the '{default_set_name}'"
                     f" key. As an observation group with the name 'policy' was found, this is assumed to be the"
                     f" appropriate observation. Consider adding the '{default_set_name}' key to the 'obs_groups'"
-                    f" dictionary for clarity. This behavior will be removed in a future version.",
-                    stacklevel=2,
+                    f" dictionary for clarity. This behavior will be removed in a future version."
                 )
             else:
                 raise ValueError(

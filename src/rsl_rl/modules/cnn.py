@@ -150,7 +150,7 @@ class CNN(nn.Sequential):
 
     def init_weights(self) -> None:
         """Initialize the weights of the CNN with Kaiming initialization."""
-        for module in self:
+        for idx, module in enumerate(self):
             if isinstance(module, nn.Conv2d):
                 torch.nn.init.kaiming_normal_(module.weight)
                 torch.nn.init.zeros_(module.bias)  # type: ignore

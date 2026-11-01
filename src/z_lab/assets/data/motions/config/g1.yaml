@@ -7,7 +7,7 @@ motion_data:
   root_quat_order: xyzw
   csv_fps: 60
   csv_paths:
-    - ../motion_tracking/g1/G1_Take_102.bvh_60hz.csv
+    - ../motion_tracking/g1/dance.csv
 
   csv_joint_names:
     - left_hip_pitch_joint

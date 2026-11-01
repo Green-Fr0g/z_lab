@@ -126,6 +126,10 @@ isaaclab = ["isaaclab", "isaaclab_newton", "isaaclab_ov", "isaaclab_physx"]
 "**/__init__.py" = ["F401", "F403"]
 "**/__init__.pyi" = ["F401", "F403"]
 "scripts/**/*.py" = ["E402"]
+# Preserve upstream RSL-RL conventions without rewriting its implementation.
+"src/rsl_rl/modules/cnn.py" = ["B007"]
+"src/rsl_rl/utils/log_writer.py" = ["B027"]
+"src/rsl_rl/utils/utils.py" = ["B028"]
 
 [tool.ruff.format]
 docstring-code-format = true

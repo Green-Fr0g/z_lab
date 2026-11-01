@@ -16,7 +16,3 @@ wandb/
 .vscode/
 
 pyrightconfig.json
-
-.agents
-
-skills

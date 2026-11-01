@@ -27,17 +27,17 @@ class LogWriter(ABC):
             global_step: Current training iteration.
         """
 
-    def store_config(self, env_cfg: dict | object, train_cfg: dict) -> None:  # noqa: B027 - optional hook
+    def store_config(self, env_cfg: dict | object, train_cfg: dict) -> None:
         """Upload environment and training configuration. Called once at training start."""
 
-    def save_model(self, model_path: str, it: int) -> None:  # noqa: B027 - optional hook
+    def save_model(self, model_path: str, it: int) -> None:
         """Upload a model checkpoint."""
 
-    def save_file(self, path: str) -> None:  # noqa: B027 - optional hook
+    def save_file(self, path: str) -> None:
         """Upload an arbitrary file."""
 
-    def save_video(self, video: pathlib.Path, it: int) -> None:  # noqa: B027 - optional hook
+    def save_video(self, video: pathlib.Path, it: int) -> None:
         """Upload a video file."""
 
-    def stop(self) -> None:  # noqa: B027 - optional hook
+    def stop(self) -> None:
         """Finalize and close the logging run."""
