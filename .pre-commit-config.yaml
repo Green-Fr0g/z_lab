@@ -3,6 +3,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+# RSL-RL maintains its own checks in src/rsl_rl/.pre-commit-config.yaml.
+exclude: ^src/rsl_rl/
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.10

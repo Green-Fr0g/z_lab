@@ -22,17 +22,9 @@ test = ["pytest"]
 wandb = ["wandb"]
 neptune = ["neptune"]
 
-# Keep the existing layout: this directory is both the project root and the Python package.
 [tool.setuptools]
-package-dir = { "rsl_rl" = "." }
-packages = [
-    "rsl_rl",
-    "rsl_rl.algorithms",
-    "rsl_rl.env",
-    "rsl_rl.extensions",
-    "rsl_rl.models",
-    "rsl_rl.modules",
-    "rsl_rl.runners",
-    "rsl_rl.storage",
-    "rsl_rl.utils",
-]
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rsl_rl*"]
