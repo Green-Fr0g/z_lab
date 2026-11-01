@@ -13,7 +13,8 @@ from z_lab.assets.robots.g1 import (
     G1_CFG,
     G1_ROOT_LINK_NAME,
 )
-from z_lab.tasks.amp.amp_env_cfg import AmpEnvCfg
+from z_lab.assets.robots.g1_amp import G1_AMP_ACTION_SCALE, G1_AMP_CFG
+from z_lab.tasks.amp.amp_env_cfg import AmpCurriculumCfg, AmpEnvCfg
 
 G1_AMP_MOTION_DIR = str(Path(__file__).resolve().parent / "motions")
 """Recorded clips in the ``csv_to_npz.py`` schema."""
@@ -105,3 +106,34 @@ class UnitreeG1AmpEnvCfg(AmpEnvCfg):
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.anchor_body_name]
         self.terminations.base_height.params["minimum_height"] = 0.2
         self.terminations.bad_orientation.params["limit_angle"] = 0.7
+
+
+@configclass
+class UnitreeG1AmpMjlabCommandsEnvCfg(UnitreeG1AmpEnvCfg):
+    """G1 AMP with the reference velocity command ranges and curriculum."""
+
+    curriculum: AmpCurriculumCfg = AmpCurriculumCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.heading_command = True
+        self.commands.base_velocity.rel_standing_envs = 0.05
+        self.commands.base_velocity.rel_heading_envs = 0.25
+        self.commands.base_velocity.heading_control_stiffness = 0.5
+        self.curriculum.velocity_ranges.params["velocity_stages"] = [
+            {"step": 0, "lin_vel_x": (-0.5, 1.0), "lin_vel_y": (-0.5, 0.5), "ang_vel_z": (-1.0, 1.0)},
+            {"step": 120000, "lin_vel_x": (-1.0, 2.0), "lin_vel_y": (-1.0, 1.0)},
+        ]
+
+
+@configclass
+class UnitreeG1AmpMjlabAssetEnvCfg(UnitreeG1AmpMjlabCommandsEnvCfg):
+    """Reference-command AMP environment with AMP-specific G1 physical parameters."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.scene.robot = G1_AMP_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.actions.joint_pos.scale = G1_AMP_ACTION_SCALE

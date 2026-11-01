@@ -9,6 +9,44 @@ from z_lab.tasks.amp.config.g1.amp_env_cfg import G1_AMP_ALL_BODY_NAMES, G1_AMP_
 from z_lab.tasks.amp.rl_cfg import AmpCfg, RslRlAmpAlgorithmCfg, RslRlAmpRunnerCfg
 
 
+def _make_amp_algorithm_cfg(discriminator_lr: float, head_weight_decay: float, replay_capacity: int):
+    return RslRlAmpAlgorithmCfg(
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.006,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+        amp_cfg=AmpCfg(
+            amp_reward_coef=0.1,
+            amp_replay_buffer_size=replay_capacity,
+            amp_discr_hidden_dims=[1024, 512, 256],
+            amp_discr_activation="relu",
+            discriminator_lr=discriminator_lr,
+            discriminator_optimizer="adam",
+            amp_trunk_weight_decay=1.0e-3,
+            amp_head_weight_decay=head_weight_decay,
+            grad_pen_coef=10.0,
+            amp_task_reward_lerp=0.75,
+            amp_state_key="amp_state",
+            motion_loader_class_name="z_lab.tasks.amp.utils.motion_loader:AMPBodyStateMotionLoader",
+            motion_loader_kwargs={
+                "motion_files": G1_AMP_MOTION_DIR,
+                "body_names": tuple(G1_AMP_LINK_NAMES),
+                "anchor_name": G1_ANCHOR_LINK_NAME,
+                "all_body_names": G1_AMP_ALL_BODY_NAMES,
+                "quat_order": "xyzw",
+            },
+        ),
+    )
+
+
 @configclass
 class G1AmpPPORunnerCfg(RslRlAmpRunnerCfg):
     """AMP-PPO runner for the Unitree G1 flat locomotion task."""
@@ -32,38 +70,12 @@ class G1AmpPPORunnerCfg(RslRlAmpRunnerCfg):
         activation="elu",
         obs_normalization=True,
     )
-    algorithm = RslRlAmpAlgorithmCfg(
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-        entropy_coef=0.006,
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=1.0e-3,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
-        amp_cfg=AmpCfg(
-            amp_reward_coef=0.1,
-            amp_replay_buffer_size=500000,
-            amp_discr_hidden_dims=[1024, 512, 256],
-            amp_discr_activation="relu",
-            discriminator_lr=1.0e-4,
-            discriminator_optimizer="adam",
-            amp_trunk_weight_decay=1.0e-3,
-            amp_head_weight_decay=1.0e-2,
-            grad_pen_coef=10.0,
-            amp_task_reward_lerp=0.75,
-            amp_state_key="amp_state",
-            motion_loader_class_name="z_lab.tasks.amp.utils.motion_loader:AMPBodyStateMotionLoader",
-            motion_loader_kwargs={
-                "motion_files": G1_AMP_MOTION_DIR,
-                "body_names": tuple(G1_AMP_LINK_NAMES),
-                "anchor_name": G1_ANCHOR_LINK_NAME,
-                "all_body_names": G1_AMP_ALL_BODY_NAMES,
-                "quat_order": "xyzw",
-            },
-        ),
-    )
+    algorithm = _make_amp_algorithm_cfg(discriminator_lr=1.0e-4, head_weight_decay=1.0e-2, replay_capacity=500000)
+
+
+@configclass
+class G1AmpReferencePPORunnerCfg(G1AmpPPORunnerCfg):
+    """AMP-MJLab numeric hyperparameters with the current independent optimizers."""
+
+    experiment_name = "g1_amp_mjlab_reference_hyperparameters"
+    algorithm = _make_amp_algorithm_cfg(discriminator_lr=1.0e-3, head_weight_decay=1.0e-1, replay_capacity=100000)

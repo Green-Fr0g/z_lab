@@ -16,6 +16,7 @@ from dataclasses import MISSING
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -289,6 +290,16 @@ class AmpEventsCfg:
 
 
 @configclass
+class AmpCurriculumCfg:
+    """Optional command curricula for AMP locomotion."""
+
+    velocity_ranges = CurrTerm(
+        func=mdp.amp_velocity_ranges,
+        params={"command_name": "base_velocity", "velocity_stages": []},
+    )
+
+
+@configclass
 class AmpRewardsCfg:
     """Reward terms for the MDP."""
 
@@ -364,6 +375,7 @@ class AmpEnvCfg(ManagerBasedRLEnvCfg):
     rewards: AmpRewardsCfg = AmpRewardsCfg()
     terminations: AmpTerminationsCfg = AmpTerminationsCfg()
     events: AmpEventsCfg = AmpEventsCfg()
+    curriculum: AmpCurriculumCfg | None = None
 
     def __post_init__(self) -> None:
         self.compute_final_obs = True
