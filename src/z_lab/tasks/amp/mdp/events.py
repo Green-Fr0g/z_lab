@@ -189,7 +189,7 @@ def reset_from_motion_data(
 
 
 class RecoveryAssistForce(ManagerTermBase):
-    """Apply a linearly decaying world-up force at one link's center of mass.
+    """Apply a delayed, linearly decaying world-up force at one link's center of mass.
 
     Run as a global interval event every control step. The permanent wrench persists through
     all physics substeps. Event-manager resets restore it before the next physics step, after
@@ -202,6 +202,8 @@ class RecoveryAssistForce(ManagerTermBase):
             raise ValueError("Recovery assistance initial_force must be finite and non-negative (N)")
         if cfg.params["decay_steps"] <= 0:
             raise ValueError("Recovery assistance decay_steps must be positive (control steps)")
+        if cfg.params["start_steps"] < 0:
+            raise ValueError("Recovery assistance start_steps must be non-negative (control steps)")
         asset_cfg = cfg.params["asset_cfg"]
         self._asset: Articulation = env.scene[asset_cfg.name]
         self._body_ids = asset_cfg.body_ids
@@ -219,11 +221,17 @@ class RecoveryAssistForce(ManagerTermBase):
         initial_force: float,
         decay_steps: int,
         asset_cfg: SceneEntityCfg,
+        start_steps: int = 0,
     ) -> None:
-        """Refresh recovery-only forces; initial_force is in N and decay_steps in control steps."""
+        """Refresh recovery-only forces after start_steps global control steps.
+
+        Assistance starts at initial_force (N), then decays to zero over decay_steps
+        control steps. Episode resets do not restart either part of the schedule.
+        """
         if env_ids is None or isinstance(env_ids, slice):
             env_ids = torch.arange(env.num_envs, device=env.device)[slice(None) if env_ids is None else env_ids]
-        self.current_force = initial_force * max(0.0, 1.0 - env.common_step_counter / decay_steps)
+        elapsed_steps = env.common_step_counter - start_steps
+        self.current_force = initial_force * max(0.0, 1.0 - elapsed_steps / decay_steps) if elapsed_steps >= 0 else 0.0
         self._forces[env_ids] = 0.0
         recovery_mask = getattr(env, "amp_recovery_env_mask", None)
         if recovery_mask is not None:

@@ -76,6 +76,7 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
 
         # root related
         self.rewards.track_root_height.weight = 1.0
+        self.rewards.track_body_upright.weight = 1.0
         self.rewards.body_ang_vel_xy_l2.weight = 0.5
         self.rewards.track_root_height.params["delay_env_rew_ratio"] = 3.5
         self.rewards.body_ang_vel_xy_l2.params["delay_env_rew_ratio"] = 0.0
@@ -97,6 +98,8 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
 
         # root related
         self.rewards.track_root_height.params["asset_cfg"].body_names = [self.root_link_name]
+        self.rewards.track_body_upright.params["body_cfg"].body_names = [self.anchor_link_name]
+        self.rewards.track_body_upright.params["height_cfg"].body_names = [self.root_link_name]
         self.rewards.body_ang_vel_xy_l2.params["body_cfg"].body_names = [self.root_link_name]
 
         # joint related
@@ -117,8 +120,10 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
         self.events.reset_from_motion.params["root_name"] = self.root_link_name
 
         # recovery assistance: world +Z force in N, decayed over control steps
-        self.events.recovery_assist.params["asset_cfg"].body_names = [self.root_link_name]
-        self.events.recovery_assist.params["initial_force"] = 200.0
+        self.events.recovery_assist.params["asset_cfg"].body_names = [self.anchor_link_name]
+        self.events.recovery_assist.params["initial_force"] = 400.0
+        # Global control steps; 24 steps per training iteration.
+        self.events.recovery_assist.params["start_steps"] = 1000 * 24
         self.events.recovery_assist.params["decay_steps"] = 120_000
 
         # feet material randomization

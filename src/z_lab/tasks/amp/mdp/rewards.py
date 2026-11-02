@@ -104,3 +104,40 @@ def track_root_height(
     if mask is None:
         return torch.zeros_like(reward)
     return torch.where(mask, reward * delay_env_rew_ratio, torch.zeros_like(reward))
+
+
+def track_body_upright(
+    env: ManagerBasedRLEnv,
+    std: float,
+    height_std: float,
+    body_cfg: SceneEntityCfg,
+    height_cfg: SceneEntityCfg,
+    mask_delay: bool = False,
+    delay_env_rew_ratio: float = 1.0,
+) -> torch.Tensor:
+    """Reward an upright body more strongly as the root approaches standing height.
+
+    The reward is the product of exponential kernels for body tilt from world +Z
+    (width ``std`` in radians) and height error (width ``height_std`` in meters).
+    ``body_cfg`` selects the body whose local +Z axis should point upward;
+    ``height_cfg`` selects the root link, compared against its asset's default root height.
+    Both selectors use their first body. Yaw does not affect the reward.
+
+    Rewards remain active outside delayed recovery. During delayed recovery they
+    can be scaled by ``delay_env_rew_ratio`` when ``mask_delay`` is enabled.
+    Returns one reward per environment, with shape (num_envs,).
+    """
+    asset = env.scene[body_cfg.name]
+    quat = asset.data.body_link_quat_w.torch[:, body_cfg.body_ids[0]]
+    up = torch.zeros_like(quat[:, :3])
+    up[:, 2] = 1.0
+    body_up_w = quat_apply(quat, up)
+    tilt = torch.acos(body_up_w[:, 2].clamp(-1.0, 1.0))
+    upright_reward = torch.exp(-torch.square(tilt) / std**2)
+
+    height_asset = env.scene[height_cfg.name]
+    target = height_asset.data.default_root_state[:, 2]
+    height = height_asset.data.body_link_pos_w.torch[:, height_cfg.body_ids[0], 2]
+    height_reward = torch.exp(-torch.square(target - height) / height_std**2)
+    reward = upright_reward * height_reward
+    return _scale_delayed_reward(env, reward, mask_delay, delay_env_rew_ratio)

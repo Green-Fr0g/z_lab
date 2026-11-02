@@ -67,9 +67,9 @@ class AmpCommandsCfg:
         heading_command=False,
         debug_vis=True,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0),
-            lin_vel_y=(-0.5, 0.5),
-            ang_vel_z=(-1.0, 1.0),
+            lin_vel_x=(-0.2, 0.4),
+            lin_vel_y=(-0.2, 0.2),
+            ang_vel_z=(-0.5, 0.5),
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
             lin_vel_x=(-1.5, 3.0),
@@ -242,6 +242,7 @@ class AmpEventsCfg:
         is_global_time=True,
         params={
             "initial_force": 0.0,
+            "start_steps": 0,
             "decay_steps": 120_000,
             "asset_cfg": SceneEntityCfg("robot", body_names=()),
         },
@@ -325,6 +326,17 @@ class AmpRewardsCfg:
             "mask_delay": True,
         },
     )
+    track_body_upright = RewTerm(
+        func=mdp.track_body_upright,
+        weight=0.0,
+        params={
+            "std": 0.7,
+            "height_std": 0.3,
+            "body_cfg": SceneEntityCfg("robot", body_names=()),
+            "height_cfg": SceneEntityCfg("robot", body_names=()),
+            "mask_delay": True,
+        },
+    )
     body_ang_vel_xy_l2 = RewTerm(
         func=mdp.body_ang_vel_xy_l2,
         weight=0.0,
@@ -401,3 +413,16 @@ class AmpEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics = SimplePhysicsCfg()
         self.sim.physics_material = self.scene.terrain.physics_material
         self.scene.contact_forces.update_period = self.sim.dt
+
+    def play_mode(self) -> None:
+        """Evaluate unassisted recovery and locomotion over the final command ranges."""
+        super().play_mode()
+
+        # Evaluate the policy without external pushes or recovery assistance.
+        self.events.push_robot = None
+        self.events.recovery_assist = None
+        self.curriculum.recovery_assist_force = None
+
+        # Keep playback commands fixed at the final ranges, independently of the limits.
+        self.curriculum.command_vel = None
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges.copy()

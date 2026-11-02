@@ -15,7 +15,7 @@ class G1_23DOFAMPRunnerCfg(RslRlOnPolicyRunnerCfg):
 
     num_steps_per_env = 24
     max_iterations = 100_001
-    save_interval = 100
+    save_interval = 200
     experiment_name = "g1_23_amp_locomotion"
     obs_groups = {"actor": ["actor"], "critic": ["critic"]}
     actor = RslRlMLPModelCfg(
