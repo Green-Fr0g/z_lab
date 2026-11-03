@@ -22,6 +22,16 @@ def recovery_assist_force(
     return env.event_manager.get_term_cfg(event_name).func.current_force
 
 
+def recovery_delay_steps(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    event_name: str = "recovery_delay_schedule",
+) -> int:
+    """Log the current maximum recovery delay in control steps."""
+    del env_ids
+    return env.event_manager.get_term_cfg(event_name).func.current_delay_steps
+
+
 class commands_vel(ManagerTermBase):
     """Linearly expand velocity ranges to their limits over global control steps.
 

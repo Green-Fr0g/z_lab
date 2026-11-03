@@ -123,8 +123,8 @@ def track_body_upright(
     ``height_cfg`` selects the root link, compared against its asset's default root height.
     Both selectors use their first body. Yaw does not affect the reward.
 
-    Rewards remain active outside delayed recovery. During delayed recovery they
-    can be scaled by ``delay_env_rew_ratio`` when ``mask_delay`` is enabled.
+    The reward is emitted only for environments currently in delayed recovery,
+    when ``mask_delay`` is enabled. It is scaled by ``delay_env_rew_ratio``.
     Returns one reward per environment, with shape (num_envs,).
     """
     asset = env.scene[body_cfg.name]
@@ -140,4 +140,7 @@ def track_body_upright(
     height = height_asset.data.body_link_pos_w.torch[:, height_cfg.body_ids[0], 2]
     height_reward = torch.exp(-torch.square(target - height) / height_std**2)
     reward = upright_reward * height_reward
-    return _scale_delayed_reward(env, reward, mask_delay, delay_env_rew_ratio)
+    mask = _delayed_failure_mask(env) if mask_delay else None
+    if mask is None:
+        return torch.zeros_like(reward)
+    return torch.where(mask, reward * delay_env_rew_ratio, torch.zeros_like(reward))

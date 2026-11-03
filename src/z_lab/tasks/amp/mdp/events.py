@@ -200,8 +200,8 @@ class RecoveryAssistForce(ManagerTermBase):
         super().__init__(cfg, env)
         if not math.isfinite(cfg.params["initial_force"]) or cfg.params["initial_force"] < 0.0:
             raise ValueError("Recovery assistance initial_force must be finite and non-negative (N)")
-        if cfg.params["decay_steps"] <= 0:
-            raise ValueError("Recovery assistance decay_steps must be positive (control steps)")
+        if cfg.params["duration_steps"] <= 0:
+            raise ValueError("Recovery assistance duration_steps must be positive (control steps)")
         if cfg.params["start_steps"] < 0:
             raise ValueError("Recovery assistance start_steps must be non-negative (control steps)")
         asset_cfg = cfg.params["asset_cfg"]
@@ -219,19 +219,21 @@ class RecoveryAssistForce(ManagerTermBase):
         env: ManagerBasedRLEnv,
         env_ids: torch.Tensor | slice | None,
         initial_force: float,
-        decay_steps: int,
+        duration_steps: int,
         asset_cfg: SceneEntityCfg,
         start_steps: int = 0,
     ) -> None:
         """Refresh recovery-only forces after start_steps global control steps.
 
-        Assistance starts at initial_force (N), then decays to zero over decay_steps
+        Assistance starts at initial_force (N), then decays to zero over duration_steps
         control steps. Episode resets do not restart either part of the schedule.
         """
         if env_ids is None or isinstance(env_ids, slice):
             env_ids = torch.arange(env.num_envs, device=env.device)[slice(None) if env_ids is None else env_ids]
         elapsed_steps = env.common_step_counter - start_steps
-        self.current_force = initial_force * max(0.0, 1.0 - elapsed_steps / decay_steps) if elapsed_steps >= 0 else 0.0
+        self.current_force = (
+            initial_force * max(0.0, 1.0 - elapsed_steps / duration_steps) if elapsed_steps >= 0 else 0.0
+        )
         self._forces[env_ids] = 0.0
         recovery_mask = getattr(env, "amp_recovery_env_mask", None)
         if recovery_mask is not None:
@@ -246,6 +248,44 @@ class RecoveryAssistForce(ManagerTermBase):
     def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
         """Restore the scheduled assistance on reset environments without restarting its decay."""
         self(self._env, env_ids, **self.cfg.params)
+
+
+class RecoveryDelaySchedule(ManagerTermBase):
+    """Tighten the delayed-termination window over global control steps."""
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        if cfg.params["target_delay_steps"] <= 0:
+            raise ValueError("Recovery delay target_delay_steps must be positive")
+        if cfg.params["start_steps"] < 0:
+            raise ValueError("Recovery delay start_steps must be non-negative (control steps)")
+        if cfg.params["duration_steps"] <= 0:
+            raise ValueError("Recovery delay duration_steps must be positive (control steps)")
+        self.initial_delay_steps: int | None = None
+        self.current_delay_steps = 0
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        env_ids: torch.Tensor | slice | None,
+        target_delay_steps: int,
+        start_steps: int,
+        duration_steps: int,
+    ) -> None:
+        """Linearly reduce max delay from its startup value to target_delay_steps."""
+        del env_ids
+        manager = env.termination_manager
+        if not isinstance(manager, DelayedTerminationManager):
+            raise RuntimeError("RecoveryDelaySchedule requires DelayedTerminationManager")
+        if self.initial_delay_steps is None:
+            self.initial_delay_steps = manager._max_delay_steps
+            if target_delay_steps > self.initial_delay_steps:
+                raise ValueError("Recovery delay target_delay_steps cannot exceed its initial delay")
+
+        progress = min(max((env.common_step_counter - start_steps) / duration_steps, 0.0), 1.0)
+        delay_steps = round(self.initial_delay_steps + progress * (target_delay_steps - self.initial_delay_steps))
+        manager._max_delay_steps = delay_steps
+        self.current_delay_steps = delay_steps
 
 
 class DelayedTerminationManager(TerminationManager):
