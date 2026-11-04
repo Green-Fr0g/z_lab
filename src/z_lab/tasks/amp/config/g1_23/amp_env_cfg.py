@@ -76,7 +76,7 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
 
         # root related
         self.rewards.track_root_height.weight = 1.0
-        self.rewards.track_body_upright.weight = 0.5
+        self.rewards.track_body_upright.weight = -1.5
         self.rewards.body_ang_vel_xy_l2.weight = 0.5
         self.rewards.track_root_height.params["delay_env_rew_ratio"] = 3.5
         self.rewards.body_ang_vel_xy_l2.params["delay_env_rew_ratio"] = 0.0
@@ -103,7 +103,6 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
         self.rewards.body_ang_vel_xy_l2.params["body_cfg"].body_names = [self.root_link_name]
 
         self.rewards.track_root_height.params["std"] = 0.2
-        self.rewards.track_body_upright.params["std"] = 0.2
         self.rewards.track_body_upright.params["height_std"] = 0.2
 
         # joint related

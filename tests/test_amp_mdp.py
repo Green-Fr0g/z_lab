@@ -102,8 +102,8 @@ def test_recovery_assistance_delays_start_and_decay_without_restarting_on_reset(
     torch.testing.assert_close(applied["forces"], torch.zeros(1, 1, 3))
 
 
-def test_upright_reward_depends_on_height_and_survives_recovery_exit():
-    """Encourage upright torsos near standing height, including after failure clears."""
+def test_upright_cost_uses_torso_tilt_and_only_penalizes_delayed_recovery():
+    """Penalize torso tilt near standing height only during delayed recovery."""
     cfg = UnitreeG123AmpEnvCfg()
     term = cfg.rewards.track_body_upright
     body_names = ["pelvis", "torso_link"]
@@ -111,7 +111,7 @@ def test_upright_reward_depends_on_height_and_survives_recovery_exit():
         selector = term.params[name]
         selector.body_ids, _ = resolve_matching_names(selector.body_names, body_names)
 
-    # Upright, forward 30/90/180 deg, sideways 90 deg, yaw 90 deg, low/high upright.
+    # Upright, forward 30/90/180 deg, sideways 90 deg, yaw 90 deg, low/high horizontal.
     quat = torch.tensor(
         [
             [0.0, 0.0, 0.0, 1.0],
@@ -120,12 +120,13 @@ def test_upright_reward_depends_on_height_and_survives_recovery_exit():
             [0.0, 1.0, 0.0, 0.0],
             [0.7071067812, 0.0, 0.0, 0.7071067812],
             [0.0, 0.0, 0.7071067812, 0.7071067812],
-            [0.0, 0.0, 0.0, 1.0],
-            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.7071067812, 0.0, 0.7071067812],
+            [0.0, 0.7071067812, 0.0, 0.7071067812],
         ]
     )
     positions = torch.zeros(8, 2, 3)
-    positions[:, 0, 2] = torch.tensor([0.8] * 6 + [0.2, 1.4])
+    half_height_offset = 0.2 * torch.log(torch.tensor(2.0)).sqrt()
+    positions[:, 0, 2] = torch.tensor([0.8] * 6 + [0.8 - half_height_offset, 0.8 + half_height_offset])
     positions[:, 1, 2] = 1.0
     data = SimpleNamespace(
         body_link_quat_w=SimpleNamespace(torch=torch.stack((torch.roll(quat, 1, 0), quat), dim=1)),
@@ -143,16 +144,70 @@ def test_upright_reward_depends_on_height_and_survives_recovery_exit():
     assert reward.shape == (8,)
     assert torch.isfinite(reward).all()
     assert torch.all((reward >= 0.0) & (reward <= 1.0))
-    assert reward[0] > reward[1] > reward[2] > reward[3]
-    torch.testing.assert_close(reward[[0, 5]], torch.ones(2))
-    torch.testing.assert_close(reward[2], reward[4])
-    torch.testing.assert_close(reward[6:], torch.tensor([0.01831564, 0.01831564]))
+    assert reward[0] < reward[1] < reward[2]
+    torch.testing.assert_close(reward[[0, 5]], torch.zeros(2))
+    torch.testing.assert_close(reward[1], torch.tensor(0.1339746))
+    torch.testing.assert_close(reward[[2, 3, 4]], torch.ones(3), atol=1.0e-6, rtol=0.0)
+    torch.testing.assert_close(reward[6:], torch.full((2,), 0.25))
+    torch.testing.assert_close(term.weight * reward[2], torch.tensor(-1.5))
 
-    # Losing the pending-failure flag must not remove posture guidance.
+    # A recovery-enabled environment without a pending failure receives no recovery reward.
     env.termination_manager._delay_counters.zero_()
-    torch.testing.assert_close(term.func(env, **term.params), reward)
+    torch.testing.assert_close(term.func(env, **term.params), torch.zeros(8))
+    env.termination_manager._delay_counters.fill_(1)
+    env.termination_manager._delay_env_mask.zero_()
+    torch.testing.assert_close(term.func(env, **term.params), torch.zeros(8))
     env.termination_manager = SimpleNamespace()
-    torch.testing.assert_close(term.func(env, **term.params), reward)
+    torch.testing.assert_close(term.func(env, **term.params), torch.zeros(8))
+
+
+def test_upright_height_gate_strengthens_posture_without_rewarding_a_lower_height():
+    """Posture fades faster at low height without creating a lower-height optimum."""
+    cfg = UnitreeG123AmpEnvCfg()
+    height_term = cfg.rewards.track_root_height
+    upright_term = cfg.rewards.track_body_upright
+    for term in (height_term, upright_term):
+        for value in term.params.values():
+            if isinstance(value, SceneEntityCfg):
+                value.body_ids = [0]
+
+    heights = torch.linspace(0.2, 1.4, 121)
+    num_envs = heights.numel()
+    positions = torch.zeros(num_envs, 1, 3)
+    positions[:, 0, 2] = heights
+    quats = torch.zeros(num_envs, 1, 4)
+    quats[:, :, 3] = 1.0
+    data = SimpleNamespace(
+        body_link_quat_w=SimpleNamespace(torch=quats),
+        body_link_pos_w=SimpleNamespace(torch=positions),
+        default_root_state=torch.tensor([[0.0, 0.0, 0.8]] * num_envs),
+    )
+    env = SimpleNamespace(
+        scene={"robot": SimpleNamespace(data=data)},
+        termination_manager=SimpleNamespace(
+            _delay_env_mask=torch.ones(num_envs, dtype=torch.bool),
+            _delay_counters=torch.ones(num_envs, dtype=torch.long),
+        ),
+    )
+
+    # Include an upright, bent, horizontal, and inverted torso at each height.
+    for pitch in (0.0, torch.pi / 4, torch.pi / 2, torch.pi):
+        quats[:, :, 1] = torch.sin(torch.tensor(pitch / 2))
+        quats[:, :, 3] = torch.cos(torch.tensor(pitch / 2))
+        height_reward = height_term.weight * height_term.func(env, **height_term.params)
+        posture_reward = upright_term.weight * upright_term.func(env, **upright_term.params)
+        total = height_reward + posture_reward
+        assert torch.isfinite(total).all()
+        assert torch.all((total >= 0.0) & (total <= 3.5 + 1.0e-6))
+        assert torch.all(posture_reward <= 0.0)
+        assert torch.all(torch.diff(total[:61]) >= -1.0e-6)
+        assert torch.all(torch.diff(total[60:]) <= 1.0e-6)
+        assert posture_reward[20].abs() < 0.01 * height_reward[20]  # pelvis at 0.4 m
+        if pitch == 0.0:
+            torch.testing.assert_close(posture_reward, torch.zeros_like(posture_reward))
+            torch.testing.assert_close(total[60], torch.tensor(3.5))
+        if pitch == torch.pi / 2:
+            torch.testing.assert_close(total[60], torch.tensor(2.0))
 
 
 def test_velocity_curriculum_reaches_limits_without_compounding():

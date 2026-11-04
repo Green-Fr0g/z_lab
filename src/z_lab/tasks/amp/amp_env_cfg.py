@@ -247,17 +247,6 @@ class AmpEventsCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names=()),
         },
     )
-    recovery_delay_schedule = EventTerm(
-        func=mdp.RecoveryDelaySchedule,
-        mode="interval",
-        interval_range_s=(0.02, 0.02),
-        is_global_time=True,
-        params={
-            "target_delay_steps": 100,
-            "start_steps": 1000 * 24,
-            "duration_steps": 7000 * 24,
-        },
-    )
     randomize_rigid_body_material = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="startup",
@@ -290,9 +279,6 @@ class AmpEventsCfg:
 class AmpCurriculumCfg:
     recovery_assist_force = CurrTerm(
         func=mdp.recovery_assist_force,
-    )
-    recovery_delay_steps = CurrTerm(
-        func=mdp.recovery_delay_steps,
     )
     command_vel = CurrTerm(
         func=mdp.commands_vel,
@@ -344,8 +330,8 @@ class AmpRewardsCfg:
         func=mdp.track_body_upright,
         weight=0.0,
         params={
-            "std": 0.7,
             "height_std": 0.3,
+            "height_power": 2.0,
             "body_cfg": SceneEntityCfg("robot", body_names=()),
             "height_cfg": SceneEntityCfg("robot", body_names=()),
             "mask_delay": True,
@@ -435,9 +421,7 @@ class AmpEnvCfg(ManagerBasedRLEnvCfg):
         # Evaluate the policy without external pushes or recovery assistance.
         self.events.push_robot = None
         self.events.recovery_assist = None
-        self.events.recovery_delay_schedule = None
         self.curriculum.recovery_assist_force = None
-        self.curriculum.recovery_delay_steps = None
 
         # Keep playback commands fixed at the final ranges, independently of the limits.
         self.curriculum.command_vel = None
