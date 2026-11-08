@@ -23,6 +23,13 @@
 1. 初始化 Git LFS 并执行 `git lfs pull`，拉取 USD、模型和其他大文件。
 2. 使用 Python 3.12 创建项目的 `.venv` 虚拟环境。
 3. 执行 `uv sync --extra rsl-rl`，安装项目和 Isaac Lab 依赖。
+4. 将 `src/rsl_rl` 中的 RSL-RL 5.5.1 + AMP 以 editable 方式安装，并检查 AMP 算法入口。
+
+已有项目环境时，可以单独安装本地 RSL-RL：
+
+```bash
+./z_lab.sh --install-rsl-rl
+```
 
 `pyproject.toml` 使用官方发布的 `isaaclab==3.0.0` 安装包，包含所需的 Isaac Lab 子模块。安装只需本项目，无需额外克隆 IsaacLab 仓库，也不依赖项目外的本地源码目录；首次安装需要联网下载 Python 依赖和 Git LFS 资产。依赖版本由 `uv.lock` 锁定。安装完成后不需要手动激活虚拟环境，脚本会通过 `uv run` 使用项目环境。
 

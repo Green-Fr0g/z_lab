@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rsl-rl-lib"
+version = "5.5.1"
+description = "RSL-RL 5.5.1 with AMP-PPO support for z_lab"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.6.0",
+    "tensordict>=0.7.0",
+    "numpy>=1.16.4",
+    "tensorboard",
+    "GitPython",
+    "onnx",
+    "onnxscript>=0.5.4",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+wandb = ["wandb"]
+neptune = ["neptune"]
+
+[tool.setuptools]
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rsl_rl*"]
