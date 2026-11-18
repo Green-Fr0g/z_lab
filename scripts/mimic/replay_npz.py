@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 
 import numpy as np
@@ -24,6 +25,12 @@ parser.add_argument(
     type=float,
     default=1.0,
     help="Playback speed multiplier. 1.0 follows the NPZ frame rate; 0 disables real-time pacing.",
+)
+parser.add_argument(
+    "--loop",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="Repeat the motion continuously. Use --no-loop to replay it once.",
 )
 parser.add_argument(
     "--physics",
@@ -122,6 +129,21 @@ def _value(data):
     return data.torch if hasattr(data, "torch") else data
 
 
+def _write_progress(loop_count: int, frame_index: int, motion: MotionLoader) -> None:
+    progress = (frame_index + 1) / motion.num_frames
+    bar_width = 24
+    filled_width = round(progress * bar_width)
+    bar = "=" * filled_width + "-" * (bar_width - filled_width)
+    motion_time = (frame_index + 1) * motion.dt
+    duration = motion.num_frames * motion.dt
+    sys.stderr.write(
+        f"\rLoop {loop_count} [{bar}] {progress:6.1%} "
+        f"| t={motion_time:.2f}/{duration:.2f}s "
+        f"| frame={frame_index + 1}/{motion.num_frames}"
+    )
+    sys.stderr.flush()
+
+
 def _scene_cfg(robot_cfg: ArticulationCfg):
     @configclass
     class SceneCfg(InteractiveSceneCfg):
@@ -166,29 +188,55 @@ def main() -> None:
                 f"Motion DOF names do not match the robot joints. Requested: {motion.dof_names}; "
                 f"matched: {matched_joint_names}"
             )
-        start_time = time.perf_counter()
-        for index in range(motion.num_frames):
-            if args_cli.playback_speed > 0.0:
-                target_time = start_time + index * motion.dt / args_cli.playback_speed
-                time.sleep(max(0.0, target_time - time.perf_counter()))
-            root_pose = _value(robot.data.default_root_pose).clone()
-            root_pose[:, :3] = motion.body_positions[index, root_index]
-            root_pose[:, 3:7] = motion.body_rotations[index, root_index]
-            root_vel = _value(robot.data.default_root_vel).clone()
-            root_vel[:, :3] = motion.body_linear_velocities[index, root_index]
-            root_vel[:, 3:] = motion.body_angular_velocities[index, root_index]
-            robot.write_root_pose_to_sim_index(root_pose=root_pose)
-            robot.write_root_velocity_to_sim_index(root_velocity=root_vel)
-            joint_pos = _value(robot.data.default_joint_pos).clone()
-            joint_vel = _value(robot.data.default_joint_vel).clone()
-            joint_pos[:, joint_ids] = motion.dof_positions[index]
-            joint_vel[:, joint_ids] = motion.dof_velocities[index]
-            robot.write_joint_position_to_sim_index(position=joint_pos)
-            robot.write_joint_velocity_to_sim_index(velocity=joint_vel)
-            scene.write_data_to_sim()
-            sim.render()
-            scene.update(sim.get_physics_dt())
-        print(f"[INFO] Replayed {motion.num_frames} frames from {args_cli.motion_file}")
+
+        action_name = os.path.splitext(os.path.basename(args_cli.motion_file))[0]
+        duration = motion.num_frames / motion.fps
+        motion_info = (
+            f"[INFO] Motion | action={action_name} | robot={motion.robot_name} "
+            f"| frames={motion.num_frames} | fps={motion.fps:g} | duration={duration:.2f}s"
+        )
+        if sys.stderr.isatty():
+            motion_info = f"\x1b[36m{motion_info}\x1b[0m"
+        print(motion_info, file=sys.stderr)
+
+        loop_count = 1
+        last_progress_update = 0.0
+        try:
+            while True:
+                start_time = time.perf_counter()
+                for index in range(motion.num_frames):
+                    if args_cli.playback_speed > 0.0:
+                        target_time = start_time + index * motion.dt / args_cli.playback_speed
+                        time.sleep(max(0.0, target_time - time.perf_counter()))
+                    root_pose = _value(robot.data.default_root_pose).clone()
+                    root_pose[:, :3] = motion.body_positions[index, root_index]
+                    root_pose[:, 3:7] = motion.body_rotations[index, root_index]
+                    root_vel = _value(robot.data.default_root_vel).clone()
+                    root_vel[:, :3] = motion.body_linear_velocities[index, root_index]
+                    root_vel[:, 3:] = motion.body_angular_velocities[index, root_index]
+                    robot.write_root_pose_to_sim_index(root_pose=root_pose)
+                    robot.write_root_velocity_to_sim_index(root_velocity=root_vel)
+                    joint_pos = _value(robot.data.default_joint_pos).clone()
+                    joint_vel = _value(robot.data.default_joint_vel).clone()
+                    joint_pos[:, joint_ids] = motion.dof_positions[index]
+                    joint_vel[:, joint_ids] = motion.dof_velocities[index]
+                    robot.write_joint_position_to_sim_index(position=joint_pos)
+                    robot.write_joint_velocity_to_sim_index(velocity=joint_vel)
+                    scene.write_data_to_sim()
+                    sim.render()
+                    scene.update(sim.get_physics_dt())
+                    now = time.perf_counter()
+                    if now - last_progress_update >= 0.1 or (
+                        not args_cli.loop and index == motion.num_frames - 1
+                    ):
+                        _write_progress(loop_count, index, motion)
+                        last_progress_update = now
+                if not args_cli.loop:
+                    break
+                loop_count += 1
+        finally:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
 
 
 if __name__ == "__main__":

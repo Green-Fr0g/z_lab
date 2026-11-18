@@ -1,8 +1,7 @@
 """Replay a CSV motion into Isaac Sim and export it as an NPZ.
 
-This script is config-free: every input comes from the command line. The
-config-driven front end ``config_csv_to_npz.py`` reads a motion yaml and
-invokes this script with the matching arguments.
+This script converts one CSV from command-line arguments. The config-driven
+batch front end ``config_csv_to_npz.py`` reuses its conversion functions.
 
 Example:
     python csv_to_npz.py \
@@ -24,56 +23,57 @@ import torch
 
 from isaaclab.app import add_launcher_args, launch_simulation
 
-parser = argparse.ArgumentParser(description="Replay motion from csv file and output to npz file.")
-parser.add_argument("--input_file", type=str, required=True, help="The path to the input motion csv file.")
-parser.add_argument("--input_fps", type=int, default=120, help="The fps of the input motion.")
-parser.add_argument(
-    "--frame_range",
-    nargs=2,
-    type=int,
-    metavar=("START", "END"),
-    help=(
-        "frame range: START END (both inclusive). The frame index starts from 1. If not provided, all frames will be"
-        " loaded."
-    ),
-)
-parser.add_argument(
-    "--physics",
-    choices=("physx", "isaacsim_physx", "newton_mjwarp", "newton_vbd", "ovphysx"),
-    default="physx",
-    help="Physics backend selected by Isaac Lab 3.0's simulation launcher.",
-)
-parser.add_argument(
-    "--visual",
-    choices=("newton_gl", "newton_rtx", "kit", "rerun", "viser", "none"),
-    default="none",
-    help="Visualizer backend. Defaults to the Newton GL window; use 'none' for headless replay.",
-)
-parser.add_argument("--output_name", type=str, required=True, help="The name of the motion npz file.")
-parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
 
-# Robot metadata, normally supplied by the config-driven launcher.
-parser.add_argument("--robot_name", type=str, required=True, help="Robot registry name used to select the asset.")
-parser.add_argument("--root_link_name", type=str, required=True, help="Root link used as the motion anchor.")
-parser.add_argument(
-    "--csv_joint_names",
-    nargs="+",
-    required=True,
-    help="Joint names matching the csv column order. Falls back to the robot joint order when omitted.",
-)
-parser.add_argument(
-    "--root_quat_order",
-    type=str,
-    default="xyzw",
-    choices=("wxyz", "xyzw"),
-    help="Quaternion order of the root rotation inside the csv.",
-)
-# Kept as a compatibility flag for older command lines. Isaac Lab 3.0 is headless when no
-# visualizer is selected, so the flag intentionally has no additional runtime effect.
-parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Replay motion from csv file and output to npz file.")
+    parser.add_argument("--input_file", type=str, required=True, help="The path to the input motion csv file.")
+    parser.add_argument("--input_fps", type=int, default=120, help="The fps of the input motion.")
+    parser.add_argument(
+        "--frame_range",
+        nargs=2,
+        type=int,
+        metavar=("START", "END"),
+        help=(
+            "frame range: START END (both inclusive). The frame index starts from 1. "
+            "If not provided, all frames will be loaded."
+        ),
+    )
+    parser.add_argument(
+        "--physics",
+        choices=("physx", "isaacsim_physx", "newton_mjwarp", "newton_vbd", "ovphysx"),
+        default="physx",
+        help="Physics backend selected by Isaac Lab 3.0's simulation launcher.",
+    )
+    parser.add_argument(
+        "--visual",
+        choices=("newton_gl", "newton_rtx", "kit", "rerun", "viser", "none"),
+        default="none",
+        help="Visualizer backend. Defaults to the Newton GL window; use 'none' for headless replay.",
+    )
+    parser.add_argument("--output_name", type=str, required=True, help="The name of the motion npz file.")
+    parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
+    parser.add_argument("--robot_name", type=str, required=True, help="Robot registry name used to select the asset.")
+    parser.add_argument("--root_link_name", type=str, required=True, help="Root link used as the motion anchor.")
+    parser.add_argument(
+        "--csv_joint_names", nargs="+", required=True, help="Joint names matching the csv column order."
+    )
+    parser.add_argument(
+        "--root_quat_order",
+        type=str,
+        default="xyzw",
+        choices=("wxyz", "xyzw"),
+        help="Quaternion order of the root rotation inside the csv.",
+    )
+    parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
+    add_launcher_args(parser)
+    return parser
 
-add_launcher_args(parser)
-args_cli = parser.parse_args()
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for single-file conversion."""
+    args = _build_parser().parse_args()
+    args.visualizer = [] if args.visual == "none" else [args.visual]
+    return args
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
@@ -142,6 +142,7 @@ class MotionLoader:
         device: torch.device,
         frame_range: tuple[int, int] | None,
         root_quat_order: str,
+        verbose: bool = True,
     ):
         self.motion_file = motion_file
         self.input_fps = input_fps
@@ -152,6 +153,7 @@ class MotionLoader:
         self.device = device
         self.frame_range = frame_range
         self.root_quat_order = root_quat_order
+        self.verbose = verbose
         self._load_motion()
         self._interpolate_motion()
         self._compute_velocities()
@@ -180,7 +182,8 @@ class MotionLoader:
         if self.input_frames == 0:
             raise ValueError(f"Motion file contains no frames: {self.motion_file}")
         self.duration = (self.input_frames - 1) * self.input_dt
-        print(f"Motion loaded ({self.motion_file}), duration: {self.duration} sec, frames: {self.input_frames}")
+        if self.verbose:
+            print(f"Motion loaded ({self.motion_file}), duration: {self.duration} sec, frames: {self.input_frames}")
 
     def _interpolate_motion(self):
         if self.duration == 0.0:
@@ -204,10 +207,11 @@ class MotionLoader:
             self.motion_dof_poss_input[index_1],
             blend.unsqueeze(1),
         )
-        print(
-            f"Motion interpolated, input frames: {self.input_frames}, input fps: {self.input_fps}, "
-            f"output frames: {self.output_frames}, output fps: {self.output_fps}"
-        )
+        if self.verbose:
+            print(
+                f"Motion interpolated, input frames: {self.input_frames}, input fps: {self.input_fps}, "
+                f"output frames: {self.output_frames}, output fps: {self.output_fps}"
+            )
 
     def _lerp(self, a: torch.Tensor, b: torch.Tensor, blend: torch.Tensor) -> torch.Tensor:
         return a * (1 - blend) + b * blend
@@ -273,6 +277,8 @@ def run_simulator(
     output_name: str,
     root_link_name: str,
     robot_name: str,
+    output_fps: int,
+    verbose: bool = True,
 ):
     robot = scene["robot"]
     if root_link_name not in robot.body_names:
@@ -291,7 +297,7 @@ def run_simulator(
         )
 
     log = {
-        "fps": [args_cli.output_fps],
+        "fps": [output_fps],
         "robot_name": [robot_name],
         "dof_names": np.array(robot.joint_names),
         "body_names": np.array(robot.body_names),
@@ -358,10 +364,53 @@ def run_simulator(
     output_path = Path(output_name).expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(output_path, **log)
-    print(f"[INFO]: Motion saved to: {output_path}")
+    if verbose:
+        print(f"[INFO]: Motion saved to: {output_path}")
+    return output_path
+
+
+def convert_motion(
+    sim: SimulationContext,
+    scene: InteractiveScene,
+    input_file: str | Path,
+    output_file: str | Path,
+    input_fps: int,
+    output_fps: int,
+    csv_joint_names: list[str],
+    root_link_name: str,
+    robot_name: str,
+    root_quat_order: str = "xyzw",
+    frame_range: tuple[int, int] | None = None,
+    verbose: bool = True,
+) -> Path:
+    """Convert one CSV using an already initialized simulation and scene."""
+    input_path = Path(input_file).expanduser().resolve()
+    if not input_path.is_file():
+        raise FileNotFoundError(f"Input motion csv file does not exist: {input_path}")
+    motion = MotionLoader(
+        motion_file=str(input_path),
+        input_fps=input_fps,
+        output_fps=output_fps,
+        device=sim.device,
+        frame_range=frame_range,
+        root_quat_order=root_quat_order,
+        verbose=verbose,
+    )
+    return run_simulator(
+        sim=sim,
+        scene=scene,
+        motion=motion,
+        csv_joint_names=csv_joint_names,
+        output_name=str(output_file),
+        root_link_name=root_link_name,
+        robot_name=robot_name,
+        output_fps=output_fps,
+        verbose=verbose,
+    )
 
 
 def main():
+    args_cli = parse_args()
     input_path = Path(args_cli.input_file).expanduser().resolve()
     if not input_path.is_file():
         raise FileNotFoundError(f"Input motion csv file does not exist: {input_path}")
@@ -392,15 +441,20 @@ def main():
         sim.reset()
         print(f"[INFO]: Setup complete with physics backend: {type(physics_cfg).__name__}")
 
-        motion = MotionLoader(
-            motion_file=str(input_path),
+        convert_motion(
+            sim=sim,
+            scene=scene,
+            input_file=input_path,
+            output_file=args_cli.output_name,
             input_fps=args_cli.input_fps,
             output_fps=args_cli.output_fps,
-            device=sim.device,
-            frame_range=tuple(args_cli.frame_range) if args_cli.frame_range is not None else None,
+            csv_joint_names=robot_dof_names,
+            root_link_name=root_link_name,
+            robot_name=robot_name,
             root_quat_order=root_quat_order,
+            frame_range=tuple(args_cli.frame_range) if args_cli.frame_range is not None else None,
+            verbose=True,
         )
-        run_simulator(sim, scene, motion, robot_dof_names, args_cli.output_name, root_link_name, robot_name)
 
 
 if __name__ == "__main__":
