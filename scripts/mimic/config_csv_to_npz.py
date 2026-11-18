@@ -1,11 +1,11 @@
 """Read a motion config yaml and convert its CSV paths via ``csv_to_npz.py``.
 
-``csv_to_npz.py`` is config-free, so this launcher acts as the
-config-driven front end:
+This script is the config-driven batch front end. It reuses the conversion
+functions from ``csv_to_npz.py`` and keeps one Isaac Sim session for all CSVs:
 
 1. read the robot and motion metadata from a yaml config
 2. resolve every CSV path relative to that config file
-3. build one ``csv_to_npz.py`` command per CSV and run it
+3. convert all CSVs in one initialized simulation session
 
 Example:
     python scripts/mimic/config_csv_to_npz.py \
@@ -21,13 +21,22 @@ Example:
 from __future__ import annotations
 
 import argparse
-import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from csv_to_npz import (
+    InteractiveScene,
+    PhysicsCfg,
+    SimulationContext,
+    _build_scene_cfg,
+    _get_robot_asset,
+    add_launcher_args,
+    convert_motion,
+    launch_simulation,
+    sim_utils,
+)
 
 
 @dataclass(frozen=True)
@@ -42,7 +51,7 @@ class MotionConfig:
     csv_paths: tuple[Path, ...]
 
 
-def parse_args() -> tuple[argparse.Namespace, list[str]]:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Read a motion config yaml and convert its CSV paths via scripts/mimic/csv_to_npz.py."
     )
@@ -80,15 +89,20 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--dry_run",
         action="store_true",
-        help="Print planned commands without running conversion.",
+        help="Print the batch plan without starting simulation or writing files.",
     )
     parser.add_argument(
-        "--python",
-        type=str,
-        default=sys.executable,
-        help="Python executable used to run csv_to_npz.py.",
+        "--visual",
+        choices=("newton_gl", "newton_rtx", "kit", "rerun", "viser", "none"),
+        default="none",
+        help="Visualizer backend. Defaults to headless conversion.",
     )
-    return parser.parse_known_args()
+    parser.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)
+    add_launcher_args(parser)
+    args = parser.parse_args()
+    if args.headless:
+        args.visual = "none"
+    return args
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -176,53 +190,13 @@ def _unique_output_path(output_dir: Path, csv_path: Path, used_names: set[str]) 
         index += 1
 
 
-def build_command(
-    python_executable: str,
-    converter_path: Path,
-    csv_path: Path,
-    motion_cfg: MotionConfig,
-    output_path: Path,
-    output_fps: int,
-    physics: str,
-    frame_range: list[int] | None,
-    passthrough_args: list[str],
-) -> list[str]:
-    """Build the ``csv_to_npz.py`` command for a single CSV file."""
-    command = [
-        python_executable,
-        str(converter_path),
-        "--input_file",
-        str(csv_path),
-        "--input_fps",
-        str(motion_cfg.input_fps),
-        "--output_name",
-        str(output_path),
-        "--output_fps",
-        str(output_fps),
-        "--physics",
-        physics,
-        "--robot_name",
-        motion_cfg.robot_name,
-        "--root_link_name",
-        motion_cfg.root_link_name,
-        "--csv_joint_names",
-        *motion_cfg.csv_joint_names,
-        "--root_quat_order",
-        motion_cfg.root_quat_order,
-    ]
-    if frame_range is not None:
-        command.extend(["--frame_range", str(frame_range[0]), str(frame_range[1])])
-    command.extend(passthrough_args)
-    return command
+def _print_line(message: str) -> None:
+    """Print one status line immediately so parent and child output stay ordered."""
+    print(message, flush=True)
 
 
 def main() -> None:
-    args, passthrough_args = parse_args()
-
-    script_dir = Path(__file__).resolve().parent
-    converter_path = script_dir / "csv_to_npz.py"
-    if not converter_path.is_file():
-        raise FileNotFoundError(f"Single-file converter not found: {converter_path}")
+    args = parse_args()
 
     config_path = args.config.expanduser().resolve()
     if not config_path.is_file():
@@ -237,60 +211,88 @@ def main() -> None:
     output_dir = args.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[INFO] Config: {config_path}")
-    print(f"[INFO] Robot: {motion_cfg.robot_name} | root link: {motion_cfg.root_link_name}")
-    print(f"[INFO] Found {len(motion_cfg.csv_paths)} csv job(s).")
-    print(f"[INFO] Output directory: {output_dir}")
-    if passthrough_args:
-        print(f"[INFO] Passing extra args to csv_to_npz.py: {' '.join(passthrough_args)}")
+    mode = "DRY RUN" if args.dry_run else "CONVERT"
+    _print_line(
+        f"[{mode}] {config_path.name} | robot={motion_cfg.robot_name} | "
+        f"jobs={len(motion_cfg.csv_paths)} | {motion_cfg.input_fps} -> {args.output_fps} FPS"
+    )
+    _print_line(f"Output: {output_dir}")
 
     converted = 0
     skipped = 0
     failed = 0
+    missing = 0
     used_names: set[str] = set()
+    jobs: list[tuple[int, Path, Path, str]] = []
 
-    for csv_path in motion_cfg.csv_paths:
+    for index, csv_path in enumerate(motion_cfg.csv_paths, start=1):
         output_path = _unique_output_path(output_dir, csv_path, used_names)
+        action_name = csv_path.stem
 
         if output_path.exists() and not args.overwrite:
-            print(f"[SKIP] {output_path} already exists.")
+            if not args.dry_run:
+                _print_line(f"[{index:02d}/{len(motion_cfg.csv_paths):02d}] SKIP {action_name}")
             skipped += 1
             continue
 
-        command = build_command(
-            python_executable=args.python,
-            converter_path=converter_path,
-            csv_path=csv_path,
-            motion_cfg=motion_cfg,
-            output_path=output_path,
-            output_fps=args.output_fps,
-            physics=args.physics,
-            frame_range=args.frame_range,
-            passthrough_args=passthrough_args,
-        )
-        print(f"[RUN] {csv_path} -> {output_path}")
-        print(f"      {' '.join(command)}")
-
-        if args.dry_run:
-            if not csv_path.is_file():
-                print(f"[WARN] CSV not found: {csv_path}")
-            converted += 1
-            continue
-
         if not csv_path.is_file():
-            print(f"[FAIL] CSV not found: {csv_path}")
-            failed += 1
+            missing += 1
+            if not args.dry_run:
+                _print_line(f"[{index:02d}/{len(motion_cfg.csv_paths):02d}] FAIL {action_name} | input missing")
             continue
+        jobs.append((index, csv_path, output_path, action_name))
 
-        result = subprocess.run(command, check=False)
-        if result.returncode != 0:
-            print(f"[FAIL] Conversion failed with exit code {result.returncode}: {csv_path}")
-            failed += 1
-            continue
-        converted += 1
+    if args.dry_run:
+        planned = len(jobs)
+        if args.verbose:
+            for index, _, output_path, action_name in jobs:
+                _print_line(f"[{index:02d}/{len(motion_cfg.csv_paths):02d}] PLAN {action_name} -> {output_path.name}")
+        _print_line(f"[DONE] planned={planned} | skipped={skipped} | missing={missing}")
+        return
 
-    print(f"[DONE] converted={converted}, skipped={skipped}, failed={failed}, total={len(motion_cfg.csv_paths)}")
-    if failed > 0:
+    if not jobs:
+        _print_line(f"[DONE] generated=0 | skipped={skipped} | missing={missing} | failed=0")
+        if missing > 0:
+            raise SystemExit(1)
+        return
+
+    robot_cfg = _get_robot_asset(motion_cfg.robot_name)
+    args.visualizer = [] if args.visual == "none" else [args.visual]
+    sim_cfg = sim_utils.SimulationCfg(device=args.device, dt=1.0 / args.output_fps)
+    sim_cfg.physics = PhysicsCfg()
+    with launch_simulation(sim_cfg, args) as physics_cfg:
+        sim_cfg.physics = physics_cfg
+        sim = SimulationContext(sim_cfg)
+        scene_cfg = _build_scene_cfg(robot_cfg)
+        scene = InteractiveScene(scene_cfg(num_envs=1, env_spacing=2.0))
+        sim.reset()
+
+        for index, csv_path, output_path, action_name in jobs:
+            _print_line(f"[{index:02d}/{len(motion_cfg.csv_paths):02d}] RUN  {action_name}")
+            try:
+                convert_motion(
+                    sim=sim,
+                    scene=scene,
+                    input_file=csv_path,
+                    output_file=output_path,
+                    input_fps=motion_cfg.input_fps,
+                    output_fps=args.output_fps,
+                    csv_joint_names=list(motion_cfg.csv_joint_names),
+                    root_link_name=motion_cfg.root_link_name,
+                    robot_name=motion_cfg.robot_name,
+                    root_quat_order=motion_cfg.root_quat_order,
+                    frame_range=tuple(args.frame_range) if args.frame_range is not None else None,
+                    verbose=args.verbose,
+                )
+            except Exception as exc:
+                _print_line(f"[{index:02d}/{len(motion_cfg.csv_paths):02d}] FAIL {action_name} | {exc}")
+                failed += 1
+                continue
+            _print_line(f"[{index:02d}/{len(motion_cfg.csv_paths):02d}] OK   {action_name}")
+            converted += 1
+
+    _print_line(f"[DONE] generated={converted} | skipped={skipped} | missing={missing} | failed={failed}")
+    if failed > 0 or missing > 0:
         raise SystemExit(1)
 
 
