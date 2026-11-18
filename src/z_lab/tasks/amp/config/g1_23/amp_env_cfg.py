@@ -15,7 +15,7 @@ from z_lab.assets.robots.g1_23 import (
 from z_lab.tasks.amp.amp_env_cfg import AmpEnvCfg
 
 MOTION_DIR = Path(__file__).resolve().parent / "motions"
-RECOVERY_CLIP_NAME = "fallAndGetUp1_subject1_frames409_1948_g1_23"
+RECOVERY_CLIP_NAME = "fallAndGetUp1_subject1_frames409_1948"
 
 
 @configclass
@@ -124,7 +124,7 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
 
         # recovery assistance: world +Z force in N, decayed over control steps
         self.events.recovery_assist.params["asset_cfg"].body_names = [self.anchor_link_name]
-        self.events.recovery_assist.params["initial_force"] = 400.0
+        self.events.recovery_assist.params["initial_force"] = 200.0
         # Global control steps; 24 steps per training iteration.
         self.events.recovery_assist.params["start_steps"] = 1000 * 24
 

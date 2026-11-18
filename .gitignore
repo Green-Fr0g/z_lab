@@ -11,6 +11,7 @@ logs/
 outputs/
 videos/
 wandb/
+src/z_lab/tasks/amp/config/*/motions/*.npz
 
 
 .vscode/

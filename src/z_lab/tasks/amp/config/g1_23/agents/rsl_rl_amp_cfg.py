@@ -5,7 +5,7 @@ from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg
 
 from z_lab.assets.robots.g1_23 import G1_23DOF_AMP_LINK_NAMES, G1_23DOF_ANCHOR_LINK_NAME
-from z_lab.tasks.amp.config.g1_23.amp_env_cfg import MOTION_DIR, RECOVERY_CLIP_NAME
+from z_lab.tasks.amp.config.g1_23.amp_env_cfg import MOTION_DIR
 from z_lab.tasks.amp.rl_cfg import RslRlAMPPpoAlgorithmCfg
 
 
@@ -29,7 +29,7 @@ class G1_23DOFAMPRunnerCfg(RslRlOnPolicyRunnerCfg):
         amp_motion_files=str(MOTION_DIR),
         amp_body_names=G1_23DOF_AMP_LINK_NAMES,
         amp_anchor_name=G1_23DOF_ANCHOR_LINK_NAME,
-        amp_exclude_motion_names=(RECOVERY_CLIP_NAME,),
+        amp_exclude_motion_names=(),
         amp_reward_coef=0.1,
         amp_task_reward_lerp=0.75,
         amp_replay_buffer_size=100_000,

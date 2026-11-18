@@ -2,11 +2,14 @@
 
 这是一个基于 Isaac Lab 3.0 的下游任务包，使用标准的 uv `src` 项目布局。
 
-当前注册了三个基于管理器的速度跟踪 locomotion 任务：
+当前注册了三个基于管理器的速度跟踪 locomotion 任务和三个 AMP locomotion 任务：
 
 - `ZLab-Velocity-Unitree-G1`：Unitree G1，29 个策略自由度。
 - `ZLab-Velocity-Unitree-G1-23DOF`：Unitree G1，23 个策略自由度。
 - `ZLab-Velocity-DR02`：DR02，29 个策略自由度。
+- `ZLab-AMP-Unitree-G1`：G1，29 个策略自由度。
+- `ZLab-AMP-Unitree-G1-23DOF`：G1，23 个策略自由度。
+- `ZLab-AMP-DR02`：DR02，29 个策略自由度。
 
 机器人资产使用 Isaac Lab 的隐式关节执行器。每个机器人的关节顺序、动作缩放、连杆名称、执行器参数和 USD 路径保存在 `src/z_lab/assets/robots` 中。
 
@@ -48,7 +51,7 @@ uv run --extra isaacsim --extra rerun isaaclab random_agent --task <任务名称
 
 ## 运行任务
 
-当前三个任务的 agent 配置均使用 RSL-RL。可以先查看已经注册的环境：
+速度跟踪和 AMP 任务的 agent 配置均使用 RSL-RL。可以先查看已经注册的环境：
 
 ```bash
 uv run isaaclab list_envs --show_presets
@@ -64,6 +67,10 @@ uv run isaaclab list_envs --show_presets
 
 # 使用 rsl_rl 训练
 ./z_lab.sh -t --task ZLab-Velocity-Unitree-G1
+
+# 训练 AMP locomotion 策略
+uv run isaaclab train --rl_library rsl_rl --task ZLab-AMP-Unitree-G1 --num_envs 256
+uv run isaaclab train --rl_library rsl_rl --task ZLab-AMP-DR02 --num_envs 256
 
 # 播放策略
 ./z_lab.sh -p --task ZLab-Velocity-Unitree-G1 --checkpoint <检查点路径>
@@ -113,6 +120,8 @@ src/z_lab/
         ├── g1_23dof/
         └── dr02/
 ```
+
+AMP 任务和机器人专用配置位于 `src/z_lab/tasks/amp/config/{g1,g1_23,dr02}`，对应的参考动作 NPZ 保存在各自的 `motions` 目录中。AMP 任务默认使用 `newton_mjwarp`；训练时可通过 `physics=<预设名称>` 选择其他已注册物理后端。
 
 新增机器人时，在 `assets/robots` 增加对应的资产配置，并在 `tasks/locomotion/config` 下增加独立的机器人配置包。机器人自己的关节名称、动作顺序和奖励权重应在该机器人的配置范围内设置；公共 locomotion 配置只保存通用环境逻辑。
 
