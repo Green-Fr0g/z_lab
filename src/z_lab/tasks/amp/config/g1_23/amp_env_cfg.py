@@ -26,7 +26,7 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
     joint_names = G1_23DOF_AMP_DOF_ORDER
     anchor_link_name = G1_23DOF_ANCHOR_LINK_NAME
     root_link_name = G1_23DOF_ROOT_LINK_NAME
-    foot_links = "left_ankle_roll_link", "right_ankle_roll_link"
+    foot_links = ["left_ankle_roll_link", "right_ankle_roll_link"]
     amp_action_scale = G1_23DOF_ACTION_SCALE
 
     def __post_init__(self):
@@ -36,32 +36,32 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
         self.scene.robot = G1_23DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
         # ------------------------------actions------------------------------
-        self.actions.joint_pos.joint_names = list(self.joint_names)
+        self.actions.joint_pos.joint_names = self.joint_names
         self.actions.joint_pos.scale = self.amp_action_scale
 
         # ------------------------------observations------------------------------
 
         # actor related
-        self.observations.actor.joint_pos.params["asset_cfg"].joint_names = list(self.joint_names)
-        self.observations.actor.joint_vel.params["asset_cfg"].joint_names = list(self.joint_names)
+        self.observations.actor.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.actor.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
         # critic related
-        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = list(self.joint_names)
-        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = list(self.joint_names)
-        self.observations.critic.body_pos_b.params["anchor_cfg"].body_names = [self.anchor_link_name]
-        self.observations.critic.body_pos_b.params["body_cfg"].body_names = list(self.amp_body_names)
-        self.observations.critic.body_ori_b.params["anchor_cfg"].body_names = [self.anchor_link_name]
-        self.observations.critic.body_ori_b.params["body_cfg"].body_names = list(self.amp_body_names)
+        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.body_pos_b.params["anchor_cfg"].body_names = self.anchor_link_name
+        self.observations.critic.body_pos_b.params["body_cfg"].body_names = self.amp_body_names
+        self.observations.critic.body_ori_b.params["anchor_cfg"].body_names = self.anchor_link_name
+        self.observations.critic.body_ori_b.params["body_cfg"].body_names = self.amp_body_names
 
         # AMP discriminator related
-        self.observations.amp.body_pos_b.params["anchor_cfg"].body_names = [self.anchor_link_name]
-        self.observations.amp.body_pos_b.params["body_cfg"].body_names = list(self.amp_body_names)
-        self.observations.amp.body_ori_b.params["anchor_cfg"].body_names = [self.anchor_link_name]
-        self.observations.amp.body_ori_b.params["body_cfg"].body_names = list(self.amp_body_names)
-        self.observations.amp.body_lin_vel_b.params["anchor_cfg"].body_names = [self.anchor_link_name]
-        self.observations.amp.body_lin_vel_b.params["body_cfg"].body_names = list(self.amp_body_names)
-        self.observations.amp.body_ang_vel_b.params["anchor_cfg"].body_names = [self.anchor_link_name]
-        self.observations.amp.body_ang_vel_b.params["body_cfg"].body_names = list(self.amp_body_names)
+        self.observations.amp.body_pos_b.params["anchor_cfg"].body_names = self.anchor_link_name
+        self.observations.amp.body_pos_b.params["body_cfg"].body_names = self.amp_body_names
+        self.observations.amp.body_ori_b.params["anchor_cfg"].body_names = self.anchor_link_name
+        self.observations.amp.body_ori_b.params["body_cfg"].body_names = self.amp_body_names
+        self.observations.amp.body_lin_vel_b.params["anchor_cfg"].body_names = self.anchor_link_name
+        self.observations.amp.body_lin_vel_b.params["body_cfg"].body_names = self.amp_body_names
+        self.observations.amp.body_ang_vel_b.params["anchor_cfg"].body_names = self.anchor_link_name
+        self.observations.amp.body_ang_vel_b.params["body_cfg"].body_names = self.amp_body_names
 
         # ------------------------------rewards------------------------------
 
@@ -93,24 +93,24 @@ class UnitreeG123AmpEnvCfg(AmpEnvCfg):
         # ------------------------------params------------------------------
 
         # track related
-        self.rewards.track_anchor_linear_velocity.params["anchor_cfg"].body_names = [self.anchor_link_name]
-        self.rewards.track_anchor_angular_velocity.params["anchor_cfg"].body_names = [self.anchor_link_name]
+        self.rewards.track_anchor_linear_velocity.params["anchor_cfg"].body_names = self.anchor_link_name
+        self.rewards.track_anchor_angular_velocity.params["anchor_cfg"].body_names = self.anchor_link_name
 
         # root related
         self.rewards.track_root_height.params["asset_cfg"].body_names = [self.root_link_name]
-        self.rewards.track_body_upright.params["body_cfg"].body_names = [self.anchor_link_name]
-        self.rewards.track_body_upright.params["height_cfg"].body_names = [self.root_link_name]
+        self.rewards.track_body_upright.params["body_cfg"].body_names = self.anchor_link_name
+        self.rewards.track_body_upright.params["height_cfg"].body_names = self.root_link_name
         self.rewards.body_ang_vel_xy_l2.params["body_cfg"].body_names = [self.root_link_name]
 
         self.rewards.track_root_height.params["std"] = 0.2
         self.rewards.track_body_upright.params["height_std"] = 0.2
 
         # joint related
-        self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = list(self.joint_names)
+        self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.joint_names
 
         # feet related
-        self.rewards.feet_slide.params["asset_cfg"].body_names = list(self.foot_links)
-        self.rewards.feet_slide.params["sensor_cfg"].body_names = list(self.foot_links)
+        self.rewards.feet_slide.params["asset_cfg"].body_names = self.foot_links
+        self.rewards.feet_slide.params["sensor_cfg"].body_names = self.foot_links
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = ["(?!.*ankle).*"]
 
         # ------------------------------events------------------------------

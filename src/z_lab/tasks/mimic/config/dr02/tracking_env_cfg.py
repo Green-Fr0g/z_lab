@@ -9,6 +9,7 @@ from z_lab.assets.robots.dr02 import (
     DR02_ANCHOR_LINK_NAME,
     DR02_CFG,
     DR02_DOF_ORDER,
+    DR02_MIMIC_LINK_NAMES,
 )
 from z_lab.tasks.mimic.tracking_env_cfg import TrackingEnvCfg
 
@@ -20,44 +21,31 @@ class DR02MimicEnvCfg(TrackingEnvCfg):
     """DR02 motion-mimic task."""
 
     anchor_body_name = DR02_ANCHOR_LINK_NAME
-    body_names = [
-        "base_link",
-        "body",
-        "left_hip_x_link",
-        "left_knee_link",
-        "left_ankle_x_link",
-        "right_hip_x_link",
-        "right_knee_link",
-        "right_ankle_x_link",
-        "left_shoulder_x_link",
-        "left_elbow_link",
-        "left_wrist_y_link",
-        "right_shoulder_x_link",
-        "right_elbow_link",
-        "right_wrist_y_link",
-    ]
+    body_names = DR02_MIMIC_LINK_NAMES
     limb_end_body_names = [
         "left_ankle_x_link",
         "right_ankle_x_link",
         "left_wrist_y_link",
         "right_wrist_y_link",
     ]
+    joint_names = DR02_DOF_ORDER
+    action_scale = DR02_ACTION_SCALE
 
     def __post_init__(self):
         super().__post_init__()
         self.scene.robot = DR02_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.actions.joint_pos.joint_names = list(DR02_DOF_ORDER)
-        self.actions.joint_pos.scale = DR02_ACTION_SCALE
+        self.actions.joint_pos.joint_names = self.joint_names
+        self.actions.joint_pos.scale = self.action_scale
         self.commands.motion.motion_file = str(MOTION_FILE)
         self.commands.motion.anchor_body_name = self.anchor_body_name
         self.commands.motion.body_names = self.body_names
-        self.commands.motion.joint_names = list(DR02_DOF_ORDER)
-        self.events.add_joint_default_pos.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.commands.motion.joint_names = self.joint_names
+        self.events.add_joint_default_pos.params["asset_cfg"].joint_names = self.joint_names
 
-        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
-        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
-        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
-        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
         self.rewards.motion_global_anchor_pos.weight = 0.5
         self.rewards.motion_global_anchor_ori.weight = 0.5

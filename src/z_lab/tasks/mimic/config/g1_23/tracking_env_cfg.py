@@ -7,6 +7,7 @@ from isaaclab.utils import configclass
 from z_lab.assets.robots.g1_23 import (
     G1_23DOF_ANCHOR_LINK_NAME,
     G1_23DOF_DOF_ORDER,
+    G1_23DOF_MIMIC_LINK_NAMES,
     MIMIC_G1_23DOF_ACTION_SCALE,
     MIMIC_G1_23DOF_CFG,
 )
@@ -20,44 +21,31 @@ class G1_23DOFMimicEnvCfg(TrackingEnvCfg):
     """G1 23-DOF motion-mimic task."""
 
     anchor_body_name = G1_23DOF_ANCHOR_LINK_NAME
-    body_names = [
-        "pelvis",
-        "torso_link",
-        "left_hip_roll_link",
-        "left_knee_link",
-        "left_ankle_roll_link",
-        "right_hip_roll_link",
-        "right_knee_link",
-        "right_ankle_roll_link",
-        "left_shoulder_roll_link",
-        "left_elbow_link",
-        "left_wrist_roll_rubber_hand",
-        "right_shoulder_roll_link",
-        "right_elbow_link",
-        "right_wrist_roll_rubber_hand",
-    ]
+    body_names = G1_23DOF_MIMIC_LINK_NAMES
     limb_end_body_names = [
         "left_ankle_roll_link",
         "right_ankle_roll_link",
         "left_wrist_roll_rubber_hand",
         "right_wrist_roll_rubber_hand",
     ]
+    joint_names = G1_23DOF_DOF_ORDER
+    action_scale = MIMIC_G1_23DOF_ACTION_SCALE
 
     def __post_init__(self):
         super().__post_init__()
         self.scene.robot = MIMIC_G1_23DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.actions.joint_pos.joint_names = list(G1_23DOF_DOF_ORDER)
-        self.actions.joint_pos.scale = MIMIC_G1_23DOF_ACTION_SCALE
+        self.actions.joint_pos.joint_names = self.joint_names
+        self.actions.joint_pos.scale = self.action_scale
         self.commands.motion.motion_file = str(MOTION_FILE)
         self.commands.motion.anchor_body_name = self.anchor_body_name
         self.commands.motion.body_names = self.body_names
-        self.commands.motion.joint_names = list(G1_23DOF_DOF_ORDER)
-        self.events.add_joint_default_pos.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.commands.motion.joint_names = self.joint_names
+        self.events.add_joint_default_pos.params["asset_cfg"].joint_names = self.joint_names
 
-        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
-        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
-        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
-        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
         self.rewards.motion_global_anchor_pos.weight = 0.5
         self.rewards.motion_global_anchor_ori.weight = 0.5

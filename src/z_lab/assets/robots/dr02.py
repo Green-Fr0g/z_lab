@@ -138,7 +138,7 @@ DR02_CFG = ArticulationCfg(
     },
 )
 
-DR02_DOF_ORDER = (
+DR02_DOF_ORDER = [
     "left_hip_y_joint",
     "left_hip_x_joint",
     "left_hip_z_joint",
@@ -168,12 +168,12 @@ DR02_DOF_ORDER = (
     "right_wrist_z_joint",
     "right_wrist_y_joint",
     "right_wrist_x_joint",
-)
+]
 DR02_AMP_DOF_ORDER = DR02_DOF_ORDER
 
 DR02_ROOT_LINK_NAME = "base_link"
 DR02_ANCHOR_LINK_NAME = "body"
-DR02_AMP_LINK_NAMES = (
+DR02_AMP_LINK_NAMES = [
     "base_link",
     "left_hip_x_link",
     "left_knee_link",
@@ -187,7 +187,23 @@ DR02_AMP_LINK_NAMES = (
     "right_shoulder_x_link",
     "right_elbow_link",
     "right_wrist_y_link",
-)
+]
+DR02_MIMIC_LINK_NAMES = [
+    "base_link",
+    "body",
+    "left_hip_x_link",
+    "left_knee_link",
+    "left_ankle_x_link",
+    "right_hip_x_link",
+    "right_knee_link",
+    "right_ankle_x_link",
+    "left_shoulder_x_link",
+    "left_elbow_link",
+    "left_wrist_y_link",
+    "right_shoulder_x_link",
+    "right_elbow_link",
+    "right_wrist_y_link",
+]
 
 
 def _dr02_actuator_value(joint_name: str, attribute: str) -> float | None:

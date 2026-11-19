@@ -100,7 +100,7 @@ G1_CFG = ArticulationCfg(
     },
 )
 
-G1_DOF_ORDER = (
+G1_DOF_ORDER = [
     "left_hip_pitch_joint",
     "left_hip_roll_joint",
     "left_hip_yaw_joint",
@@ -130,13 +130,29 @@ G1_DOF_ORDER = (
     "right_wrist_roll_joint",
     "right_wrist_pitch_joint",
     "right_wrist_yaw_joint",
-)
+]
 
 G1_AMP_DOF_ORDER = G1_DOF_ORDER
 
 G1_ROOT_LINK_NAME = "pelvis"
 G1_ANCHOR_LINK_NAME = "torso_link"
-G1_AMP_LINK_NAMES = (
+G1_MIMIC_LINK_NAMES = [
+    "pelvis",
+    "left_hip_roll_link",
+    "left_knee_link",
+    "left_ankle_roll_link",
+    "right_hip_roll_link",
+    "right_knee_link",
+    "right_ankle_roll_link",
+    "torso_link",
+    "left_shoulder_roll_link",
+    "left_elbow_link",
+    "left_wrist_yaw_link",
+    "right_shoulder_roll_link",
+    "right_elbow_link",
+    "right_wrist_yaw_link",
+]
+G1_AMP_LINK_NAMES = [
     "pelvis",
     "left_hip_roll_link",
     "left_knee_link",
@@ -150,7 +166,7 @@ G1_AMP_LINK_NAMES = (
     "right_shoulder_roll_link",
     "right_elbow_link",
     "right_wrist_yaw_link",
-)
+]
 
 
 def _g1_actuator_value(joint_name: str, attribute: str) -> float | None:
@@ -178,7 +194,7 @@ def _g1_actuator_value(joint_name: str, attribute: str) -> float | None:
 def _g1_action_scale() -> dict[str, float]:
     """Map each controlled joint to its action scale, ``0.25 * effort_limit / stiffness``."""
     scales = {}
-    for joint_name in list(G1_DOF_ORDER):
+    for joint_name in G1_DOF_ORDER:
         effort_limit = _g1_actuator_value(joint_name, "joint_effort_limit")
         stiffness = _g1_actuator_value(joint_name, "stiffness")
         if effort_limit and stiffness:

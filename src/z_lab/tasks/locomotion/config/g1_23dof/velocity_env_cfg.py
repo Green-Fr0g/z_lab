@@ -11,6 +11,7 @@ class UnitreeG123VelocityEnvCfg(LocomotionEnvCfg):
     waist_joints = ["waist.*"]
     hip_joints = [".*_hip_roll_joint", ".*_hip_yaw_joint"]
     foot_links = [".*ankle_roll.*"]
+    joint_names = G1_23DOF_DOF_ORDER
 
     def __post_init__(self):
         super().__post_init__()
@@ -20,13 +21,13 @@ class UnitreeG123VelocityEnvCfg(LocomotionEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + G1_23DOF_ROOT_LINK_NAME
 
         # ------------------------------actions------------------------------
-        self.actions.joint_position.joint_names = list(G1_23DOF_DOF_ORDER)
+        self.actions.joint_position.joint_names = self.joint_names
 
         # ------------------------------observations------------------------------
-        self.observations.policy.joint_pos_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
-        self.observations.policy.joint_vel_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
-        self.observations.critic.joint_pos_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
-        self.observations.critic.joint_vel_rel.params["asset_cfg"].joint_names = list(G1_23DOF_DOF_ORDER)
+        self.observations.policy.joint_pos_rel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.policy.joint_vel_rel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_pos_rel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_vel_rel.params["asset_cfg"].joint_names = self.joint_names
 
         # ------------------------------rewards------------------------------
 

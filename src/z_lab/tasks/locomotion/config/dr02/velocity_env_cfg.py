@@ -11,6 +11,7 @@ class DR02VelocityEnvCfg(LocomotionEnvCfg):
     waist_joints = ["waist_[xyz]_joint"]
     hip_joints = [".*_hip_[xz]_joint"]
     foot_links = [".*ankle_x_link"]
+    joint_names = DR02_DOF_ORDER
 
     def __post_init__(self):
         super().__post_init__()
@@ -20,13 +21,13 @@ class DR02VelocityEnvCfg(LocomotionEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + DR02_ANCHOR_LINK_NAME
 
         # ------------------------------actions------------------------------
-        self.actions.joint_position.joint_names = list(DR02_DOF_ORDER)
+        self.actions.joint_position.joint_names = self.joint_names
 
         # ------------------------------observations------------------------------
-        self.observations.policy.joint_pos_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
-        self.observations.policy.joint_vel_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
-        self.observations.critic.joint_pos_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
-        self.observations.critic.joint_vel_rel.params["asset_cfg"].joint_names = list(DR02_DOF_ORDER)
+        self.observations.policy.joint_pos_rel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.policy.joint_vel_rel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_pos_rel.params["asset_cfg"].joint_names = self.joint_names
+        self.observations.critic.joint_vel_rel.params["asset_cfg"].joint_names = self.joint_names
 
         # ------------------------------rewards------------------------------
 
