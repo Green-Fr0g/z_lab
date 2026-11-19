@@ -2,7 +2,7 @@
 
 这是一个基于 Isaac Lab 3.0 的下游任务包，使用标准的 uv `src` 项目布局。
 
-当前注册了三个基于管理器的速度跟踪 locomotion 任务和三个 AMP locomotion 任务：
+项目包含速度跟踪、AMP、Mimic 和 SuperMimic 四类管理器任务。以下是速度跟踪和 AMP 的任务 ID。
 
 - `ZLab-Velocity-Unitree-G1`：Unitree G1，29 个策略自由度。
 - `ZLab-Velocity-Unitree-G1-23DOF`：Unitree G1，23 个策略自由度。
@@ -100,6 +100,19 @@ uv run isaaclab benchmark training --rl_library rsl_rl --task <任务名称> --m
 ```
 
 可以使用 `physics=<预设名称>` 选择 `isaaclab list_envs --show_presets` 输出的物理后端预设。
+
+### SuperMimic 环境
+
+- `ZLab-SuperMimic-GenCoord-G1` 提供 71 维浮动根与关节状态。
+- `ZLab-SuperMimic-MaxCoord-G1` 提供 14 个跟踪连杆的 182 维位姿和速度状态。
+
+两个任务默认在 Newton/MJWarp 上跟踪本地 50 Hz 舞蹈动作。可用零动作或随机动作检查仿真，SuperMimic 联合训练使用独立的训练入口。
+
+```bash
+uv run isaaclab list_envs --keyword SuperMimic --show_presets
+uv run isaaclab zero_agent --task ZLab-SuperMimic-GenCoord-G1 --num_envs 4 --max_steps 20 --viz none
+uv run isaaclab random_agent --task ZLab-SuperMimic-MaxCoord-G1 --num_envs 4 --max_steps 20 --viz none
+```
 
 ## 项目结构
 

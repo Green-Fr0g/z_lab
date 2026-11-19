@@ -120,7 +120,7 @@ class MotionCommand(CommandTerm):
         body_indexes = self.robot.find_bodies(self.cfg.body_names, preserve_order=True)[0]
         self.body_indexes = torch.as_tensor(_value(body_indexes), dtype=torch.long, device=self.device)
 
-        self.motion = MotionLoader(self.cfg.motion_file, body_names=self.cfg.body_names, device=self.device)
+        self.motion = self._load_motion()
         self._align_motion_joints_to_robot()
         joint_indexes = self.robot.find_joints(self.cfg.joint_names, preserve_order=True)[0]
         self.joint_indexes = torch.as_tensor(_value(joint_indexes), dtype=torch.long, device=self.device)
@@ -149,6 +149,9 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_entropy"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
+
+    def _load_motion(self) -> MotionLoader:
+        return MotionLoader(self.cfg.motion_file, body_names=self.cfg.body_names, device=self.device)
 
     def _align_motion_joints_to_robot(self):
         """Reorder motion joints to the live robot joint order."""
@@ -358,6 +361,15 @@ class MotionCommand(CommandTerm):
         env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
         self._resample_command(env_ids)
 
+        self.body_pos_relative_w, self.body_quat_relative_w = self.aligned_body_poses()
+
+        self.bin_failed_count = (
+            self.cfg.adaptive_alpha * self._current_bin_failed + (1 - self.cfg.adaptive_alpha) * self.bin_failed_count
+        )
+        self._current_bin_failed.zero_()
+
+    def aligned_body_poses(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Align reference poses to the live anchor's XY and yaw at the current frame."""
         anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
         anchor_quat_w_repeat = self.anchor_quat_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
         robot_anchor_pos_w_repeat = self.robot_anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
@@ -367,13 +379,10 @@ class MotionCommand(CommandTerm):
         delta_pos_w[..., 2] = anchor_pos_w_repeat[..., 2]
         delta_ori_w = yaw_quat(quat_mul(robot_anchor_quat_w_repeat, quat_inv(anchor_quat_w_repeat)))
 
-        self.body_quat_relative_w = quat_mul(delta_ori_w, self.body_quat_w)
-        self.body_pos_relative_w = delta_pos_w + quat_apply(delta_ori_w, self.body_pos_w - anchor_pos_w_repeat)
-
-        self.bin_failed_count = (
-            self.cfg.adaptive_alpha * self._current_bin_failed + (1 - self.cfg.adaptive_alpha) * self.bin_failed_count
+        return (
+            delta_pos_w + quat_apply(delta_ori_w, self.body_pos_w - anchor_pos_w_repeat),
+            quat_mul(delta_ori_w, self.body_quat_w),
         )
-        self._current_bin_failed.zero_()
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
