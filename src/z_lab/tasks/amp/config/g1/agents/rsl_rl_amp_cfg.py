@@ -27,7 +27,7 @@ class G1AMPRunnerCfg(RslRlOnPolicyRunnerCfg):
     critic = RslRlMLPModelCfg(hidden_dims=[512, 256, 128], activation="elu", obs_normalization=True)
     algorithm = RslRlAMPPpoAlgorithmCfg(
         amp_motion_files=str(MOTION_DIR),
-        amp_body_names=G1_AMP_LINK_NAMES,
+        amp_body_names=list(G1_AMP_LINK_NAMES),
         amp_anchor_name=G1_ANCHOR_LINK_NAME,
         amp_exclude_motion_names=(),
         amp_reward_coef=0.1,

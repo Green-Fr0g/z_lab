@@ -17,7 +17,7 @@ class RslRlAMPPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
     amp_motion_files: str = MISSING
     """Path to the expert motion NPZ files or their directory."""
 
-    amp_body_names: tuple[str, ...] = MISSING
+    amp_body_names: list[str] = MISSING
     """Ordered body names used to construct the AMP features."""
 
     amp_anchor_name: str = MISSING

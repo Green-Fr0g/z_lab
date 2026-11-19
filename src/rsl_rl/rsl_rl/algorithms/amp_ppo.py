@@ -8,12 +8,11 @@
 from __future__ import annotations
 
 import math
-from itertools import chain
-from typing import Any
-
 import torch
 import torch.nn as nn
+from itertools import chain
 from tensordict import TensorDict
+from typing import Any
 
 from rsl_rl.algorithms.ppo import PPO
 from rsl_rl.env import VecEnv
@@ -33,7 +32,7 @@ class AMPPPO(PPO):
         critic: MLPModel,
         storage: RolloutStorage,
         amp_motion_files: str,
-        amp_body_names: tuple[str, ...],
+        amp_body_names: tuple[str, ...] | list[str],
         amp_anchor_name: str,
         amp_reward_coef: float = 0.1,
         amp_task_reward_lerp: float = 0.75,
