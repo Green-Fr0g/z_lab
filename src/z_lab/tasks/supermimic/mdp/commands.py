@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from isaaclab.utils import configclass
-from isaaclab.utils.math import quat_apply, quat_from_euler_xyz, quat_mul, sample_uniform
+from isaaclab.utils.math import quat_from_euler_xyz, quat_mul, sample_uniform
 
 from z_lab.tasks.mimic.mdp.commands import MotionCommand as MimicMotionCommand
 from z_lab.tasks.mimic.mdp.commands import MotionCommandCfg as MimicMotionCommandCfg
@@ -97,13 +97,6 @@ class MotionLibrary(MotionLoader):
     def root_ang_vel_w(self) -> torch.Tensor:
         return self._body_ang_vel_w[:, 0]
 
-    def convert_legacy_velocities(self, body_com_pos_b: torch.Tensor) -> None:
-        """Recover link velocities from z_lab CSV conversions using CoM velocity aliases."""
-        offsets = quat_apply(self._body_quat_w, body_com_pos_b.expand_as(self._body_pos_w))
-        com_motion = torch.linalg.cross(self._body_ang_vel_w, offsets, dim=-1)
-        # The CSV root-link velocity was written as the pelvis CoM velocity.
-        self._body_lin_vel_w = self._body_lin_vel_w - com_motion + com_motion[:, :1]
-
 
 class MotionCommand(MimicMotionCommand):
     """Advance clips and write reference states on episode reset."""
@@ -114,9 +107,6 @@ class MotionCommand(MimicMotionCommand):
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv) -> None:
         super().__init__(cfg, env)
         self._sampling_probs = torch.full((self.bin_count,), 1 / self.bin_count, device=self.device)
-        if cfg.legacy_com_velocities:
-            com_pos = self.robot.data.body_com_pos_b.torch[0, self.body_indexes]
-            self.motion.convert_legacy_velocities(com_pos)
         if not 0 <= cfg.play_clip < len(self.motion.motion_names):
             raise ValueError(f"Invalid SuperMimic clip index {cfg.play_clip}.")
         clip_length = int(self.motion.motion_ends[cfg.play_clip] - self.motion.motion_starts[cfg.play_clip])
@@ -218,4 +208,3 @@ class MotionCommandCfg(MimicMotionCommandCfg):
     sampling_mode: Literal["start", "uniform", "external"] = "uniform"
     play_clip: int = 0
     play_frame: int = 0
-    legacy_com_velocities: bool = True

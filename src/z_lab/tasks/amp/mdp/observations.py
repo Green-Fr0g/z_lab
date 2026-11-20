@@ -47,7 +47,7 @@ def robot_body_ori_b(env: ManagerBasedEnv, anchor_cfg: SceneEntityCfg, body_cfg:
 def robot_body_lin_vel_b(env: ManagerBasedEnv, anchor_cfg: SceneEntityCfg, body_cfg: SceneEntityCfg):
     del anchor_cfg
     asset = env.scene[body_cfg.name]
-    vel_w = asset.data.body_lin_vel_w.torch[:, body_cfg.body_ids]
+    vel_w = asset.data.body_link_lin_vel_w.torch[:, body_cfg.body_ids]
     quat_w = asset.data.body_link_quat_w.torch[:, body_cfg.body_ids]
     return quat_apply_inverse(quat_w.reshape(-1, 4), vel_w.reshape(-1, 3)).reshape(env.num_envs, -1)
 

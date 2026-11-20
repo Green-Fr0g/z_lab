@@ -75,6 +75,7 @@ def parse_args() -> argparse.Namespace:
     args.visualizer = [] if args.visual == "none" else [args.visual]
     return args
 
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.physics import PhysicsCfg
@@ -328,8 +329,8 @@ def run_simulator(
         root_velocity = _value(robot.data.default_root_vel).clone()
         root_velocity[:, :3] = motion_base_lin_vel
         root_velocity[:, 3:] = motion_base_ang_vel
-        robot.write_root_pose_to_sim_index(root_pose=root_pose)
-        robot.write_root_velocity_to_sim_index(root_velocity=root_velocity)
+        robot.write_root_link_pose_to_sim_index(root_pose=root_pose)
+        robot.write_root_link_velocity_to_sim_index(root_velocity=root_velocity)
 
         joint_pos = _value(robot.data.default_joint_pos).clone()
         joint_vel = _value(robot.data.default_joint_vel).clone()
@@ -347,10 +348,10 @@ def run_simulator(
 
         log["dof_positions"].append(_value(robot.data.joint_pos)[0].cpu().numpy().copy())
         log["dof_velocities"].append(_value(robot.data.joint_vel)[0].cpu().numpy().copy())
-        log["body_positions"].append(_value(robot.data.body_pos_w)[0].cpu().numpy().copy())
-        log["body_rotations"].append(_value(robot.data.body_quat_w)[0].cpu().numpy().copy())
-        log["body_linear_velocities"].append(_value(robot.data.body_lin_vel_w)[0].cpu().numpy().copy())
-        log["body_angular_velocities"].append(_value(robot.data.body_ang_vel_w)[0].cpu().numpy().copy())
+        log["body_positions"].append(_value(robot.data.body_link_pos_w)[0].cpu().numpy().copy())
+        log["body_rotations"].append(_value(robot.data.body_link_quat_w)[0].cpu().numpy().copy())
+        log["body_linear_velocities"].append(_value(robot.data.body_link_lin_vel_w)[0].cpu().numpy().copy())
+        log["body_angular_velocities"].append(_value(robot.data.body_link_ang_vel_w)[0].cpu().numpy().copy())
 
     for key in (
         "dof_positions",

@@ -214,8 +214,8 @@ def main() -> None:
                     root_vel = _value(robot.data.default_root_vel).clone()
                     root_vel[:, :3] = motion.body_linear_velocities[index, root_index]
                     root_vel[:, 3:] = motion.body_angular_velocities[index, root_index]
-                    robot.write_root_pose_to_sim_index(root_pose=root_pose)
-                    robot.write_root_velocity_to_sim_index(root_velocity=root_vel)
+                    robot.write_root_link_pose_to_sim_index(root_pose=root_pose)
+                    robot.write_root_link_velocity_to_sim_index(root_velocity=root_vel)
                     joint_pos = _value(robot.data.default_joint_pos).clone()
                     joint_vel = _value(robot.data.default_joint_vel).clone()
                     joint_pos[:, joint_ids] = motion.dof_positions[index]
@@ -226,9 +226,7 @@ def main() -> None:
                     sim.render()
                     scene.update(sim.get_physics_dt())
                     now = time.perf_counter()
-                    if now - last_progress_update >= 0.1 or (
-                        not args_cli.loop and index == motion.num_frames - 1
-                    ):
+                    if now - last_progress_update >= 0.1 or (not args_cli.loop and index == motion.num_frames - 1):
                         _write_progress(loop_count, index, motion)
                         last_progress_update = now
                 if not args_cli.loop:

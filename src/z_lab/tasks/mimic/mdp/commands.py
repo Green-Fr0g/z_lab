@@ -226,35 +226,35 @@ class MotionCommand(CommandTerm):
 
     @property
     def robot_body_pos_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_pos_w)[:, self.body_indexes]
+        return _value(self.robot.data.body_link_pos_w)[:, self.body_indexes]
 
     @property
     def robot_body_quat_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_quat_w)[:, self.body_indexes]
+        return _value(self.robot.data.body_link_quat_w)[:, self.body_indexes]
 
     @property
     def robot_body_lin_vel_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_lin_vel_w)[:, self.body_indexes]
+        return _value(self.robot.data.body_link_lin_vel_w)[:, self.body_indexes]
 
     @property
     def robot_body_ang_vel_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_ang_vel_w)[:, self.body_indexes]
+        return _value(self.robot.data.body_link_ang_vel_w)[:, self.body_indexes]
 
     @property
     def robot_anchor_pos_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_pos_w)[:, self.robot_anchor_body_index]
+        return _value(self.robot.data.body_link_pos_w)[:, self.robot_anchor_body_index]
 
     @property
     def robot_anchor_quat_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_quat_w)[:, self.robot_anchor_body_index]
+        return _value(self.robot.data.body_link_quat_w)[:, self.robot_anchor_body_index]
 
     @property
     def robot_anchor_lin_vel_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_lin_vel_w)[:, self.robot_anchor_body_index]
+        return _value(self.robot.data.body_link_lin_vel_w)[:, self.robot_anchor_body_index]
 
     @property
     def robot_anchor_ang_vel_w(self) -> torch.Tensor:
-        return _value(self.robot.data.body_ang_vel_w)[:, self.robot_anchor_body_index]
+        return _value(self.robot.data.body_link_ang_vel_w)[:, self.robot_anchor_body_index]
 
     def _update_metrics(self):
         self.metrics["error_anchor_pos"] = torch.norm(self.anchor_pos_w - self.robot_anchor_pos_w, dim=-1)
@@ -349,10 +349,10 @@ class MotionCommand(CommandTerm):
         )
         self.robot.write_joint_position_to_sim_index(position=joint_pos[env_ids], env_ids=env_ids)
         self.robot.write_joint_velocity_to_sim_index(velocity=joint_vel[env_ids], env_ids=env_ids)
-        self.robot.write_root_pose_to_sim_index(
+        self.robot.write_root_link_pose_to_sim_index(
             root_pose=torch.cat([root_pos[env_ids], root_ori[env_ids]], dim=-1), env_ids=env_ids
         )
-        self.robot.write_root_velocity_to_sim_index(
+        self.robot.write_root_link_velocity_to_sim_index(
             root_velocity=torch.cat([root_lin_vel[env_ids], root_ang_vel[env_ids]], dim=-1), env_ids=env_ids
         )
 
