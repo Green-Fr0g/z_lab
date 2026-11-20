@@ -94,6 +94,10 @@ class ActorCfg(ObsGroup):
     )
     actions = ObsTerm(func=mdp.last_action)
 
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
 
 @configclass
 class GoalCfg(ObsGroup):
@@ -112,6 +116,10 @@ class GoalCfg(ObsGroup):
         params={"num_frames": 10, "frame_stride": 5},
     )
 
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
 
 @configclass
 class GenCoordStateCfg(ObsGroup):
@@ -122,12 +130,20 @@ class GenCoordStateCfg(ObsGroup):
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"], preserve_order=True)},
     )
 
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
 
 @configclass
 class MaxCoordStateCfg(ObsGroup):
     """Tracked link poses and link velocities."""
 
     state = ObsTerm(func=mdp.maxcoord_state)
+
+    def __post_init__(self) -> None:
+        self.enable_corruption = False
+        self.concatenate_terms = True
 
 
 @configclass
@@ -231,7 +247,7 @@ class SuperMimicGenCoordEnvCfg(ManagerBasedRLEnvCfg):
         self.commands.motion.velocity_range = {}
         self.commands.motion.joint_position_range = (0.0, 0.0)
         self.events.foot_friction.params["friction_range"] = (0.75, 0.75)
-        self.events.base_com.params["com_range"] = {axis: (0.0, 0.0) for axis in ("x", "y", "z")}
+        self.events.base_com.params["com_range"] = {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)}
         self.events.encoder_bias.params["bias_range"] = (0.0, 0.0)
 
 

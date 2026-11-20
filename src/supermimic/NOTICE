@@ -1,0 +1,10 @@
+This package contains adaptations of SuperMimic, Copyright 2025-2026 Qiayuan L.
+The upstream project is available at https://github.com/qiayuanl/SuperMimic
+and is licensed under the Apache License, Version 2.0.
+
+The algorithm design and initial implementations in this package are adapted
+from SuperMimic commit abc124c. Isaac Lab environment integration is maintained
+in z_lab.
+
+The differentiable forward-kinematics implementation is adapted from mjlab,
+Copyright 2025-2026 The MjLab Developers, Apache-2.0.
