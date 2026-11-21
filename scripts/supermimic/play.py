@@ -18,7 +18,7 @@ def main() -> None:
     parser.add_argument("--num-steps", type=int, default=1000)
     parser.add_argument("--task-encoder", choices=("motion", "velocity"), default="motion")
     parser.add_argument("--velocity-command", nargs=3, type=float, default=(0.0, 0.0, 0.0))
-    parser.add_argument("--physics", choices=("newton_mjwarp", "newton_vbd"), default="newton_mjwarp")
+    parser.add_argument("--physics", default="newton_mjwarp", help="Isaac Lab physics preset for the task.")
     add_launcher_args(parser)
     args = parser.parse_args()
 

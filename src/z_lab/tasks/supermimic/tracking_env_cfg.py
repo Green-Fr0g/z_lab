@@ -233,7 +233,7 @@ class SuperMimicGenCoordEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         self.sim.physics = mdp.SimplePhysicsCfg()
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.scene.contact_forces.update_period = self.sim.dt
+        self.scene.contact_forces = None
         self.viewer.eye = (1.5, 1.5, 1.5)
         self.viewer.origin_type = "asset_root"
         self.viewer.asset_name = "robot"

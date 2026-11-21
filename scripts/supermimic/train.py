@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--motion-file", type=Path)
     parser.add_argument("--sampling-mode", choices=("return", "uniform", "start"), default="return")
     parser.add_argument("--buffer-size", type=int, default=1000)
+    parser.add_argument("--replay-ratio", type=float, default=16.0)
     parser.add_argument("--wm-batch-size", type=int, default=2048)
     parser.add_argument("--wm-num-batches", type=int, default=10)
     parser.add_argument("--wm-horizon", type=int, default=8)
@@ -25,7 +26,7 @@ def main() -> None:
     parser.add_argument("--history-length", type=int, default=1)
     parser.add_argument("--motion-slot-fraction", type=float, default=0.5)
     parser.add_argument("--run-dir", type=Path, default=Path("logs/supermimic"))
-    parser.add_argument("--physics", choices=("newton_mjwarp", "newton_vbd"), default="newton_mjwarp")
+    parser.add_argument("--physics", default="newton_mjwarp", help="Isaac Lab physics preset for the task.")
     add_launcher_args(parser)
     args = parser.parse_args()
     if not 0.0 < args.motion_slot_fraction < 1.0:
@@ -65,6 +66,7 @@ def main() -> None:
                 max_iterations=args.max_iterations,
                 representation=representation,
                 replay_buffer_size=args.buffer_size,
+                replay_ratio=args.replay_ratio,
                 sampling_mode=args.sampling_mode,
                 history_length=args.history_length,
                 slot_mix={

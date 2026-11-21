@@ -142,17 +142,19 @@ class Ratio:
     """Carry fractional model updates across environment collection steps."""
 
     def __init__(self, ratio: float) -> None:
-        self.ratio = ratio
-        self.remainder = 0.0
-        self.started = False
+        self._ratio = ratio
+        self._previous_step: float | None = None
 
-    def __call__(self) -> int:
-        if not self.started:
-            self.started = True
+    def __call__(self, step: int) -> int:
+        if self._ratio == 0:
+            return 0
+        if self._ratio < 0:
             return 1
-        self.remainder += self.ratio
-        updates = int(self.remainder)
-        self.remainder -= updates
+        if self._previous_step is None:
+            self._previous_step = step
+            return 1
+        updates = int((step - self._previous_step) * self._ratio)
+        self._previous_step += updates / self._ratio
         return updates
 
 
@@ -259,6 +261,9 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
             velocity_task=cfg.velocity,
             history_length=self.actor.history_length,
         )
+        if self.adapter.device.type == "cuda":
+            self.world_model_env.reset = torch.compile(self.world_model_env.reset)
+            self.world_model_env.step = torch.compile(self.world_model_env.step)
         self.policy_learner: BpttPolicyLearner
         if isinstance(cfg.policy, ActorCriticPolicyLearnerCfg):
             critic_input_dim = self.representation.rep_state_dim + self._wm.num_goals + self._wm.sim_context_dim
@@ -333,12 +338,13 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         self._update_return_sampler(motion_time, rewards, terminated, truncated)
         return rewards
 
-    def _train_updates(self) -> dict[str, torch.Tensor]:
+    def _train_updates(self, iteration: int) -> dict[str, torch.Tensor]:
         losses: dict[str, torch.Tensor] = {}
+        updates = self._updates_per_step(iteration)
         min_sequence = max(self.cfg.world_model.horizon, 2)
         if self.replay_buffer.num_transitions < min_sequence:
             return losses
-        for _ in range(self._updates_per_step()):
+        for _ in range(updates):
             sequences = [
                 self.replay_buffer.sample(self.cfg.world_model.horizon, self.cfg.world_model.batch_size)
                 for _ in range(self.cfg.world_model.num_batches)
@@ -376,7 +382,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         losses: dict[str, torch.Tensor] = {}
         for iteration in range(self.cfg.max_iterations):
             rewards = self.step()
-            losses.update(self._train_updates())
+            losses.update(self._train_updates(iteration))
 
             self._iteration = iteration
             if iteration % self.cfg.log_interval == 0:

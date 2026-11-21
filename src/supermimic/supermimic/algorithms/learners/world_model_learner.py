@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import torch
 from tensordict import TensorDict
 
+from supermimic.algorithms.learners.cuda_graph import CapturedUpdate, graph_state
 from supermimic.algorithms.learners.optimizer import build_optimizers, optimize_step
 from supermimic.algorithms.models import Dynamics
 from supermimic.algorithms.representations import StateRepresentation
@@ -47,15 +48,24 @@ class WorldModelLearner:
         if cfg.num_batches <= 0 or cfg.batch_size <= 0 or cfg.horizon < 2:
             raise ValueError("world-model batches and batch size must be positive, horizon must be at least two")
         self._parameters = list(dynamics.parameters())
+        device = self._parameters[0].device
         self.optimizers = build_optimizers(
             [dynamics],
             cfg.learning_rate,
-            next(dynamics.parameters()).device,
+            device,
         )
         self._loss_weights = {
             name: 1.0 / getattr(cfg, config_name) ** 2
             for name, config_name in representation.LOSS_WEIGHT_CONFIG.items()
         }
+        self._represent = representation.represent
+        self._predict_sequence = self._rollout
+        self._state_loss = self._compute_losses
+        if device.type == "cuda":
+            self._represent = torch.compile(self._represent)
+            self._predict_sequence = torch.compile(self._predict_sequence)
+            self._state_loss = torch.compile(self._state_loss)
+        self._captured_update = CapturedUpdate(self._update_from, self._graph_state)
 
     @torch.no_grad()
     def update_normalization(self, states: torch.Tensor, actions: torch.Tensor) -> None:
@@ -71,24 +81,26 @@ class WorldModelLearner:
     def update(self, sequences: Iterable[TensorDict]) -> dict[str, torch.Tensor]:
         """Apply one optimizer step per replay sequence batch."""
         self.dynamics.train()
+        self.dynamics.requires_grad_(True)
+        batches = torch.stack([sequence.select("state", "action", "sim_ctx") for sequence in sequences])
         try:
-            return self._update_from(sequences)
+            return self._captured_update(batches)
         finally:
             self.dynamics.eval()
 
-    def _update_from(self, sequences: Iterable[TensorDict]) -> dict[str, torch.Tensor]:
+    def _update_from(self, batches: TensorDict) -> dict[str, torch.Tensor]:
         totals: dict[str, list[torch.Tensor]] = {}
-        for sequence in sequences:
+        for sequence in batches.unbind(0):
             states = sequence["state"]
             actions = sequence["action"]
             if states.shape[1] < 2 or actions.shape[1] < 2:
                 raise ValueError("world-model training sequences need at least two transitions")
-            rep_states = self.representation.represent(states)
+            rep_states = self._represent(states)
             aux_states = self.representation.extract_aux_state(states)
-            pred_rep_states, pred_aux_states = self._rollout(
-                rep_states[:, 0], actions, aux_states[:, 0], sequence["sim_ctx"]
+            pred_rep_states, pred_aux_states = self._predict_sequence(
+                rep_states[:, 0], actions, aux_states[:, 0], sequence["sim_ctx"][:, 0]
             )
-            loss, group_losses = self._compute_losses(
+            loss, group_losses = self._state_loss(
                 pred_rep_states, pred_aux_states, rep_states[:, 1:], aux_states[:, 1:]
             )
             optimize_step(self.optimizers, loss, self._parameters, self.cfg.max_grad_norm)
@@ -108,7 +120,7 @@ class WorldModelLearner:
         predictions_rep: list[torch.Tensor] = []
         predictions_aux: list[torch.Tensor] = []
         for step in range(actions.shape[1] - 1):
-            aux_state, rep_state = self.dynamics(rep_state, actions[:, step], aux_state, sim_context[:, step])
+            aux_state, rep_state = self.dynamics(rep_state, actions[:, step], aux_state, sim_context)
             predictions_rep.append(rep_state)
             predictions_aux.append(aux_state)
         return torch.stack(predictions_rep, dim=1), torch.stack(predictions_aux, dim=1)
@@ -132,3 +144,6 @@ class WorldModelLearner:
             sum(group_losses[name] * self._loss_weights[name] * widths[name] for name in group_losses) / denominator
         )
         return total_loss, group_losses
+
+    def _graph_state(self) -> list[torch.Tensor]:
+        return graph_state((self.dynamics, self.representation), self.optimizers)

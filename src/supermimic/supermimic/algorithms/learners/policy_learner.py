@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 
 import torch
 from tensordict import TensorDict
 from torch import nn
 
+from supermimic.algorithms.learners.cuda_graph import CapturedUpdate, graph_state
 from supermimic.algorithms.learners.optimizer import build_optimizers, optimize_step
 from supermimic.envs.world_model_env import WorldModelEnv
 
@@ -23,6 +23,9 @@ class BpttPolicyLearnerCfg:
     horizon: int = 32
     gamma: float = 1.0
     max_grad_norm: float = 1.0
+    survival_masking: bool = True
+    beta2: float = 0.95
+    grad_clip_value: float = 0.1
 
 
 @dataclass
@@ -72,7 +75,9 @@ class BpttPolicyLearner:
         self.cfg = cfg
         device = next(actor.parameters()).device
         self.actor_parameters = list(actor.parameters())
-        self.actor_optimizers = build_optimizers([actor], cfg.learning_rate, device)
+        self.actor_optimizers = build_optimizers([actor], cfg.learning_rate, device, betas=(0.9, cfg.beta2))
+        self._rollout_actor = torch.compile(actor) if device.type == "cuda" else actor
+        self._captured_update = CapturedUpdate(self._update_from, self._graph_state)
 
     def update(self) -> dict[str, torch.Tensor]:
         """Run configured model rollouts and update the policy."""
@@ -80,14 +85,15 @@ class BpttPolicyLearner:
         self.world_model_env.dynamics.eval().requires_grad_(False)
         self.world_model_env.representation.eval().requires_grad_(False)
         try:
-            return self._update_from(self.world_model_env.sample_initial_states() for _ in range(self.cfg.num_batches))
+            starts = torch.stack([self.world_model_env.sample_initial_states() for _ in range(self.cfg.num_batches)])
+            return self._captured_update(starts)
         finally:
             self.world_model_env.dynamics.requires_grad_(True)
             self.world_model_env.representation.requires_grad_(True)
 
-    def _update_from(self, batches: Iterable[TensorDict]) -> dict[str, torch.Tensor]:
+    def _update_from(self, batches: TensorDict) -> dict[str, torch.Tensor]:
         logs: dict[str, list[torch.Tensor]] = {}
-        for starts in batches:
+        for starts in batches.unbind(0):
             for name, value in self._train_batch(starts).items():
                 logs.setdefault(name, []).append(value)
         scale = self.world_model_env.representation.dt * self.cfg.horizon
@@ -103,6 +109,7 @@ class BpttPolicyLearner:
             (aux_loss - total_return).mean(),
             self.actor_parameters,
             self.cfg.max_grad_norm,
+            self.cfg.grad_clip_value,
         )
         critic_stats = self._fit_critic(rollout, last_observations)
         auxiliary_stats = getattr(self.actor, "auxiliary_stats", None)
@@ -124,7 +131,7 @@ class BpttPolicyLearner:
         auxiliary_loss = getattr(self.actor, "auxiliary_loss", None)
         rollout: list[TensorDict] = []
         for step in range(self.cfg.horizon):
-            action = self.actor(observations)
+            action = self._rollout_actor(observations)
             if auxiliary_loss is not None:
                 aux_loss = aux_loss + auxiliary_loss()
             next_observations, reward, termination = self.world_model_env.step(action)
@@ -149,10 +156,12 @@ class BpttPolicyLearner:
                 )
             )
             total_return = total_return + self.cfg.gamma**step * survival * reward
-            survival = survival * (1.0 - termination)
+            if self.cfg.survival_masking:
+                survival = survival * (1.0 - termination)
             observations = next_observations
 
-        total_return = total_return + self._bootstrap(observations, survival)
+        alive = survival if self.cfg.survival_masking else 1.0 - termination
+        total_return = total_return + self._bootstrap(observations, alive)
         return rollout, total_return, aux_loss, observations
 
     def _bootstrap(self, observations: TensorDict, survival: torch.Tensor) -> torch.Tensor | float:
@@ -162,6 +171,10 @@ class BpttPolicyLearner:
     def _fit_critic(self, rollout: list[TensorDict], last_observations: TensorDict) -> dict[str, torch.Tensor]:
         """Return critic metrics for learners that train a value function."""
         return {}
+
+    def _graph_state(self) -> list[torch.Tensor]:
+        env = self.world_model_env
+        return graph_state((self.actor, env.dynamics, env.representation), self.actor_optimizers)
 
 
 class ActorCriticPolicyLearner(BpttPolicyLearner):
@@ -230,3 +243,6 @@ class ActorCriticPolicyLearner(BpttPolicyLearner):
                 )
                 losses.append(value_loss.detach())
         return {"value_function": torch.stack(losses).mean()}
+
+    def _graph_state(self) -> list[torch.Tensor]:
+        return super()._graph_state() + graph_state((self.critic,), self.critic_optimizers)

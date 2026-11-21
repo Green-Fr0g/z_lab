@@ -16,7 +16,7 @@ class VelocityTaskCfg:
     """Body-frame planar velocity command ranges and training perturbations."""
 
     lin_vel_x_range: tuple[float, float] = (-1.5, 1.5)
-    lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
+    lin_vel_y_range: tuple[float, float] = (-0.5, 0.5)
     ang_vel_z_range: tuple[float, float] = (-3.14, 3.14)
     window_frames: int = 25
     command_noise: tuple[float, float, float] = (0.5, 0.5, 0.785)
@@ -50,12 +50,12 @@ def velocity_goal_from_motion(
     add_noise: bool = True,
 ) -> torch.Tensor:
     """Project centered-mean reference velocity into the current root frame."""
-    if cfg.window_frames <= 0:
-        raise ValueError("window_frames must be positive")
+    if cfg.window_frames < 0:
+        raise ValueError("window_frames must be nonnegative")
     if root_quat_xyzw.shape[:-1] != motion_times.shape or root_quat_xyzw.shape[-1] != 4:
         raise ValueError("root quaternions must have shape [batch, 4]")
 
-    if cfg.window_frames == 1:
+    if cfg.window_frames <= 1:
         linear_world = motion.root_lin_vel_w[motion_times]
         angular_world = motion.root_ang_vel_w[motion_times]
     else:

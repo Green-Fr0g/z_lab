@@ -47,13 +47,17 @@ def optimize_step(
     loss: torch.Tensor,
     parameters: Iterable[torch.Tensor],
     max_grad_norm: float,
+    grad_clip_value: float = 0.0,
 ) -> torch.Tensor:
     """Backpropagate one loss, clip gradients and step each optimizer."""
     optimizers = list(optimizers)
     for optimizer in optimizers:
         optimizer.zero_grad(set_to_none=True)
     loss.backward()
+    parameters = list(parameters)
     grad_norm = torch.nn.utils.clip_grad_norm_(parameters, max_grad_norm)
+    if grad_clip_value > 0.0:
+        torch.nn.utils.clip_grad_value_(parameters, grad_clip_value)
     for optimizer in optimizers:
         optimizer.step()
     return grad_norm
