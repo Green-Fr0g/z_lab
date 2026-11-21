@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from math import isfinite
 from typing import Any
 
 import torch
@@ -24,13 +25,7 @@ from supermimic.utils.math import (
 )
 from supermimic.utils.tracking_reward import tracking_reward
 
-PROPRIO_NOISE_HALF_WIDTHS = {
-    "projected_gravity": 0.05,
-    "base_ang_vel": 0.2,
-    "joint_pos": 0.01,
-    "joint_vel": 0.5,
-    "actions": 0.0,
-}
+PROPRIO_OBS_TERMS = ("projected_gravity", "base_ang_vel", "joint_pos", "joint_vel", "actions")
 
 
 def extract_actor_goal(wm_goal: torch.Tensor, num_goal_frames: int) -> torch.Tensor:
@@ -196,16 +191,24 @@ class StateRepresentation(nn.Module, ABC):
     def configure_actor_observation(
         self,
         num_actions: int,
+        noise_half_widths: Mapping[str, float],
     ) -> None:
-        """Configure deployable proprioception and its per-component noise bounds."""
+        """Expand configured noise half-widths into the actor's proprioception layout."""
         if num_actions <= 0:
             raise ValueError("num_actions must be positive")
+        if noise_half_widths.keys() != set(PROPRIO_OBS_TERMS):
+            raise ValueError(f"Proprio noise must specify exactly these terms: {PROPRIO_OBS_TERMS}")
+        for name, magnitude in noise_half_widths.items():
+            if not isfinite(magnitude) or magnitude < 0.0:
+                raise ValueError(f"Proprio noise half-width for {name!r} must be finite and non-negative")
+        if not any(noise_half_widths.values()):
+            self._proprio_noise_bounds = None
+            return
         widths = (3, 3, self.num_joints, self.num_joints, num_actions)
-        magnitudes = tuple(PROPRIO_NOISE_HALF_WIDTHS.values())
         self._proprio_noise_bounds = torch.cat(
             [
-                self.default_joint_pos.new_full((width,), magnitude)
-                for width, magnitude in zip(widths, magnitudes, strict=True)
+                self.default_joint_pos.new_full((width,), noise_half_widths[name])
+                for name, width in zip(PROPRIO_OBS_TERMS, widths, strict=True)
             ]
         )
 
@@ -243,8 +246,9 @@ class StateRepresentation(nn.Module, ABC):
         return history_length * self.proprio_obs_dim(num_actions) + actor_goal_width
 
     def add_proprio_noise(self, observation: torch.Tensor) -> torch.Tensor:
+        """Apply independent uniform noise when observation noise is configured."""
         if self._proprio_noise_bounds is None:
-            raise RuntimeError("Call configure_actor_observation before adding proprio noise")
+            return observation
         return observation + ((torch.rand_like(observation) * 2.0 - 1.0) * self._proprio_noise_bounds).detach()
 
     def compute_actor_sensor(

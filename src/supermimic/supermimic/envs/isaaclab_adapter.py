@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 
-from supermimic.algorithms.representations import PROPRIO_NOISE_HALF_WIDTHS
+from supermimic.algorithms.representations import PROPRIO_OBS_TERMS
 from supermimic.kinematics import RobotModel, load_robot_model
 
 
@@ -47,9 +47,12 @@ class IsaacLabSuperMimicAdapter:
     def validate_proprio_layout(self) -> int:
         """Check that the task exposes the proprioception synthesized by the model."""
         manager = self.env.observation_manager
-        terms = list(PROPRIO_NOISE_HALF_WIDTHS)
         widths = (3, 3, self.num_actions, self.num_actions, self.num_actions)
-        if manager.active_terms["actor"] != terms or manager.group_obs_term_dim["actor"] != [(n,) for n in widths]:
+        term_dims = [(width,) for width in widths]
+        if (
+            tuple(manager.active_terms["actor"]) != PROPRIO_OBS_TERMS
+            or manager.group_obs_term_dim["actor"] != term_dims
+        ):
             raise ValueError("Unexpected SuperMimic actor observation terms or widths")
         robot = self.motion_command.robot
         joint_names = list(self.action_term._joint_names)
@@ -62,6 +65,37 @@ class IsaacLabSuperMimicAdapter:
         if motion_names != joint_names:
             raise ValueError("Motion goal joints must follow action order")
         return sum(widths)
+
+    def motion_goal_window(self) -> tuple[int, int]:
+        """Read the common frame count and stride from the task's goal terms."""
+        goal = self.env.cfg.observations.goal
+        names = ["command", "motion_anchor_pos_b", "motion_anchor_ori_b"]
+        manager = self.env.observation_manager
+        if manager.active_terms["goal"] != names:
+            raise ValueError("Unexpected SuperMimic motion goal observation terms")
+        params = goal.command.params
+        frames, stride = params["num_frames"], params["frame_stride"]
+        if frames <= 0 or stride <= 0:
+            raise ValueError("Motion goal frame count and stride must be positive")
+        for name in names[1:]:
+            params = getattr(goal, name).params
+            if (params["num_frames"], params["frame_stride"]) != (frames, stride):
+                raise ValueError(f"Motion goal term {name!r} must use the command's frame count and stride")
+        widths = [(frames * width,) for width in (2 * self.num_actions, 3, 6)]
+        if manager.group_obs_term_dim["goal"] != widths:
+            raise ValueError("Unexpected SuperMimic motion goal observation widths")
+        return frames, stride
+
+    def validate_full_state_layout(self, representation: str, width: int) -> None:
+        """Check that the selected representation matches the task's full state."""
+        if representation == "gencoord":
+            expected = 13 + 2 * self.num_actions
+        elif representation == "maxcoord":
+            expected = 13 * len(self.motion_command.cfg.body_names)
+        else:
+            raise ValueError(f"Unknown SuperMimic representation {representation!r}")
+        if width != expected:
+            raise ValueError(f"Invalid {representation} full-state width {width}, expected {expected}")
 
     def motion_times(self) -> torch.Tensor:
         """Copy the reference frame indices before the command manager advances them."""

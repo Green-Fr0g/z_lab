@@ -24,6 +24,7 @@ class G1SuperMimicGenCoordEnvCfg(SuperMimicGenCoordEnvCfg):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        self.scene.num_envs = 16
         self.scene.robot = MIMIC_G1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.actions.joint_pos.joint_names = G1_DOF_ORDER
         self.actions.joint_pos.scale = MIMIC_G1_ACTION_SCALE

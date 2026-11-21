@@ -40,7 +40,6 @@ class WorldModelEnv(ABC):
         self.dynamics = dynamics
         self.representation = representation
         representation.bind(soft_joint_pos_limits=soft_joint_pos_limits)
-        representation.configure_actor_observation(self.num_actions)
         self.motion = motion_command.motion
         self.motion_joint_indices = motion_command.joint_indexes
         self._anchor_index = getattr(motion_command, "motion_anchor_body_index", 0)

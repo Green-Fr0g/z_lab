@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -38,34 +37,32 @@ from supermimic.tasks import VelocityTaskCfg, advance_proprio_history, build_act
 class BaseRunnerCfg:
     """Shared world model, replay and observation settings."""
 
-    replay_buffer_size: int = 1000
-    representation: Literal["gencoord", "maxcoord"] = "gencoord"
-    history_length: int = 1
-    num_goal_frames: int = 10
-    goal_frame_stride: int = 5
-    dynamics_hidden_dims: tuple[int, ...] = (2048, 2048, 2048)
-    world_model: WorldModelLearnerCfg = field(default_factory=WorldModelLearnerCfg)
-    run_dir: Path = Path("logs/supermimic")
-    log_interval: int = 10
-    save_interval: int = 1000
+    replay_buffer_size: int
+    representation: Literal["gencoord", "maxcoord"]
+    history_length: int
+    dynamics_hidden_dims: tuple[int, ...]
+    world_model: WorldModelLearnerCfg
+    proprio_noise: dict[str, float]
+    log_interval: int
+    save_interval: int
 
 
 @dataclass
 class SuperMimicRunnerCfg(BaseRunnerCfg):
     """Multi-encoder policy, training and reset sampling settings."""
 
-    max_iterations: int = 1_000_000
-    replay_ratio: float = 16.0
-    action_noise: float = 0.1
-    actor_hidden_dims: tuple[int, ...] = (2048, 1024, 512, 256)
-    critic_hidden_dims: tuple[int, ...] = (256, 128)
-    latent_dim: int = 32
-    latent_bc_weight: float = 0.1
-    slot_mix: dict[str, float] = field(default_factory=lambda: {"motion": 0.5, "velocity": 0.5})
-    velocity: VelocityTaskCfg = field(default_factory=VelocityTaskCfg)
-    sampling_mode: Literal["return", "uniform", "start"] = "return"
-    policy: BpttPolicyLearnerCfg | ActorCriticPolicyLearnerCfg = field(default_factory=ActorCriticPolicyLearnerCfg)
-    return_sampler: ReturnSamplerCfg = field(default_factory=ReturnSamplerCfg)
+    max_iterations: int
+    replay_ratio: float
+    action_noise: float
+    actor_hidden_dims: tuple[int, ...]
+    critic_hidden_dims: tuple[int, ...]
+    latent_dim: int
+    latent_bc_weight: float
+    slot_mix: dict[str, float]
+    velocity: VelocityTaskCfg
+    sampling_mode: Literal["return", "uniform", "start"]
+    policy: BpttPolicyLearnerCfg | ActorCriticPolicyLearnerCfg
+    return_sampler: ReturnSamplerCfg
 
 
 @dataclass(frozen=True)
@@ -84,14 +81,12 @@ def build_world_model(cfg: BaseRunnerCfg, adapter: IsaacLabSuperMimicAdapter) ->
     env = adapter.env
     env.reset()
     observations = adapter.observations()
-    full_state_dim = observations["full_state"].shape[-1]
+    adapter.validate_full_state_layout(cfg.representation, observations["full_state"].shape[-1])
     num_joints = adapter.num_actions
     default_joint_pos = adapter.default_joint_pos()
     joint_limits = adapter.soft_joint_pos_limits()
     robot_model = adapter.load_robot_model()
     if cfg.representation == "gencoord":
-        if full_state_dim != 13 + 2 * num_joints:
-            raise ValueError(f"invalid GenCoord full-state dimension {full_state_dim}")
         representation: StateRepresentation = GenCoordRepresentation(
             num_joints, default_joint_pos, env.step_dt, env.cfg.decimation
         )
@@ -99,8 +94,6 @@ def build_world_model(cfg: BaseRunnerCfg, adapter: IsaacLabSuperMimicAdapter) ->
         representation.bind(forward_kinematics=fk, soft_joint_pos_limits=joint_limits)
     else:
         num_bodies = len(robot_model.body_names)
-        if full_state_dim != num_bodies * 13:
-            raise ValueError(f"invalid MaxCoord full-state dimension {full_state_dim}")
         representation = MaxCoordRepresentation(num_bodies, default_joint_pos, env.step_dt, env.cfg.decimation)
         ik = AnalyticIK(robot_model, device=adapter.device, dtype=default_joint_pos.dtype)
         representation.bind(analytic_ik=ik, soft_joint_pos_limits=joint_limits)
@@ -118,11 +111,13 @@ def build_world_model(cfg: BaseRunnerCfg, adapter: IsaacLabSuperMimicAdapter) ->
     return WorldModel(representation, dynamics, observations["goal"].shape[-1], proprio_dim, sim_context_dim)
 
 
-def build_actor(cfg: SuperMimicRunnerCfg, world_model: WorldModel, device: torch.device) -> MultiEncoderAE:
+def build_actor(
+    cfg: SuperMimicRunnerCfg, world_model: WorldModel, num_goal_frames: int, device: torch.device
+) -> MultiEncoderAE:
     """Build the actor with Motion and Velocity goal encoders."""
     num_actions = world_model.dynamics.num_actions
-    motion_goal_dim = world_model.num_goals - 3 * cfg.num_goal_frames
-    if motion_goal_dim != cfg.num_goal_frames * (2 * num_actions + 6):
+    motion_goal_dim = world_model.num_goals - 3 * num_goal_frames
+    if motion_goal_dim != num_goal_frames * (2 * num_actions + 6):
         raise ValueError("goal observation does not match the configured joint-motion window")
     if any(cfg.slot_mix.get(name, 0.0) <= 0.0 for name in ("motion", "velocity")):
         raise ValueError("motion and velocity slot fractions must both be positive")
@@ -172,6 +167,7 @@ class BaseRunner[CfgT: BaseRunnerCfg](ABC):
     def _init_common(self) -> None:
         self._wm = build_world_model(self.cfg, self.adapter)
         self.representation = self._wm.representation
+        self.representation.configure_actor_observation(self.adapter.num_actions, self.cfg.proprio_noise)
         self.dynamics = self._wm.dynamics
         self.replay_buffer = ReplayBuffer(
             self._buffer_schema(), self.cfg.replay_buffer_size, self.adapter.num_envs, self.adapter.device
@@ -232,18 +228,14 @@ class BaseRunner[CfgT: BaseRunnerCfg](ABC):
         self.world_model_learner.update_normalization(fields["state"], actions)
         return next_observations, rewards, terminated, truncated
 
-    def _create_log_dir(self) -> Path:
-        run_dir = self.cfg.run_dir / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        run_dir.mkdir(parents=True, exist_ok=True)
-        return run_dir
-
 
 class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
     """Train a shared actor with Motion and Velocity encoders in model rollouts."""
 
     def _init_policy(self) -> None:
         cfg = self.cfg
-        self.actor = build_actor(cfg, self._wm, self.adapter.device)
+        self.num_goal_frames, self.goal_frame_stride = self.adapter.motion_goal_window()
+        self.actor = build_actor(cfg, self._wm, self.num_goal_frames, self.adapter.device)
         thresholds = self.env.cfg.terminations
         self.world_model_env = MultiTaskWorldModelEnv(
             dynamics=self.dynamics,
@@ -255,8 +247,8 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
             reward_weights=self.adapter.reward_weights(),
             anchor_pos_threshold=thresholds.anchor_pos.params["threshold"],
             anchor_ori_threshold=thresholds.anchor_ori.params["threshold"],
-            num_goal_frames=cfg.num_goal_frames,
-            goal_frame_stride=cfg.goal_frame_stride,
+            num_goal_frames=self.num_goal_frames,
+            goal_frame_stride=self.goal_frame_stride,
             task_specs=self.actor.task_specs,
             velocity_task=cfg.velocity,
             history_length=self.actor.history_length,
@@ -275,7 +267,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         model_batch_count = cfg.world_model.num_batches * cfg.world_model.batch_size * cfg.world_model.horizon
         update_ratio = self.adapter.num_envs * cfg.replay_ratio / model_batch_count
         self._updates_per_step = Ratio(update_ratio)
-        self._iteration = 0
+        self._iteration = -1
 
     def _build_sim_obs_td(
         self,
@@ -284,7 +276,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         motion_times: torch.Tensor,
         sim_ctx: torch.Tensor,
     ) -> TensorDict:
-        actor_goal = extract_actor_goal(full_goal, self.cfg.num_goal_frames)
+        actor_goal = extract_actor_goal(full_goal, self.num_goal_frames)
         root_quat_xyzw = self.representation.extract_aux_state(state)[:, 3:7]
         critic_observation = torch.cat((self.representation.represent(state), full_goal, sim_ctx), dim=-1)
         return build_actor_obs_td(
@@ -375,12 +367,14 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         if weights is not None:
             self.adapter.motion_command.set_sampling_distribution(weights)
 
-    def run(self) -> Path:
-        """Collect transitions, update both learners and save local artifacts."""
-        run_dir = self._create_log_dir()
+    def run(self, log_dir: Path, infos: dict | None = None) -> Path:
+        """Collect transitions, update both learners and save training checkpoints."""
+        log_dir.mkdir(parents=True, exist_ok=True)
         start_time = time.monotonic()
         losses: dict[str, torch.Tensor] = {}
-        for iteration in range(self.cfg.max_iterations):
+        start_iteration = self._iteration + 1
+        end_iteration = start_iteration + self.cfg.max_iterations
+        for iteration in range(start_iteration, end_iteration):
             rewards = self.step()
             losses.update(self._train_updates(iteration))
 
@@ -394,22 +388,21 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                     f"replay={self.replay_buffer.num_transitions}/{self.cfg.replay_buffer_size} "
                     f"elapsed={elapsed:.1f}s {metrics}"
                 )
-            if iteration % self.cfg.save_interval == 0 or iteration + 1 == self.cfg.max_iterations:
-                checkpoint = run_dir / f"checkpoint_{iteration}.pt"
-                self.save(checkpoint)
-                from supermimic.runners.exporter import export_actor_as_onnx
+            if iteration % self.cfg.save_interval == 0 or iteration + 1 == end_iteration:
+                self.save(log_dir / f"model_{iteration}.pt", infos)
+        return log_dir
 
-                deployment_files = export_actor_as_onnx(
-                    self.actor, self.env, run_dir, checkpoint.stem, self.cfg.velocity
-                )
-                print("[SuperMimic] deployment files written to " + ", ".join(str(file) for file in deployment_files))
-        return run_dir
-
-    def save(self, path: Path) -> None:
+    def save(self, path: Path, infos: dict | None = None) -> None:
         """Write actor, world model, optimizers and configuration to a checkpoint."""
         checkpoint = {
-            "iteration": self._iteration,
-            "config": asdict(self.cfg),
+            "format_version": 1,
+            "iter": self._iteration,
+            "infos": infos,
+            "config": {
+                **asdict(self.cfg),
+                "num_goal_frames": self.num_goal_frames,
+                "goal_frame_stride": self.goal_frame_stride,
+            },
             "actor": self.actor.state_dict(),
             "dynamics": self.dynamics.state_dict(),
             "actor_optimizers": [optimizer.state_dict() for optimizer in self.policy_learner.actor_optimizers],
@@ -426,8 +419,46 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
             checkpoint["critic_optimizers"] = [
                 optimizer.state_dict() for optimizer in self.policy_learner.critic_optimizers
             ]
-        torch.save(checkpoint, path)
+        temporary_path = path.with_suffix(".tmp")
+        torch.save(checkpoint, temporary_path)
+        temporary_path.replace(path)
 
-    def train(self) -> Path:
-        """Retain the previous entry point for callers of the Isaac Lab runner."""
-        return self.run()
+    def load(self, checkpoint: dict) -> None:
+        """Restore weights and optimizer states before collecting a new replay buffer."""
+        if checkpoint["representation"] != self.cfg.representation:
+            raise ValueError("Checkpoint representation must match the training agent")
+        if checkpoint["joint_names"] != list(self.adapter.action_term._joint_names):
+            raise ValueError("Checkpoint joints must match the training task's action order")
+        if checkpoint["body_names"] != list(self.adapter.motion_command.cfg.body_names):
+            raise ValueError("Checkpoint links must match the training task's tracking order")
+        saved_cfg = checkpoint["config"]
+        if (saved_cfg["num_goal_frames"], saved_cfg["goal_frame_stride"]) != (
+            self.num_goal_frames,
+            self.goal_frame_stride,
+        ) or saved_cfg["history_length"] != self.cfg.history_length:
+            raise ValueError("Checkpoint observation history and Motion window must match the training task")
+        if checkpoint["actor_obs_mode"] != "proprio" or checkpoint["task_names"] != list(self.actor.task_names):
+            raise ValueError("Checkpoint actor observations and encoders must match the training agent")
+        has_critic = isinstance(self.policy_learner, ActorCriticPolicyLearner)
+        if has_critic != ("critic" in checkpoint):
+            raise ValueError("Checkpoint policy learner must match the training agent")
+
+        self.actor.load_state_dict(checkpoint["actor"])
+        self.dynamics.load_state_dict(checkpoint["dynamics"])
+        for optimizer, state in zip(self.policy_learner.actor_optimizers, checkpoint["actor_optimizers"], strict=True):
+            optimizer.load_state_dict(state)
+        for optimizer, state in zip(
+            self.world_model_learner.optimizers, checkpoint["world_model_optimizers"], strict=True
+        ):
+            optimizer.load_state_dict(state)
+        if isinstance(self.policy_learner, ActorCriticPolicyLearner):
+            self.policy_learner.critic.load_state_dict(checkpoint["critic"])
+            for optimizer, state in zip(
+                self.policy_learner.critic_optimizers, checkpoint["critic_optimizers"], strict=True
+            ):
+                optimizer.load_state_dict(state)
+        self._iteration = checkpoint["iter"] if "iter" in checkpoint else checkpoint["iteration"]
+
+    def train(self, log_dir: Path, infos: dict | None = None) -> Path:
+        """Run the training loop in the supplied run directory."""
+        return self.run(log_dir, infos)
