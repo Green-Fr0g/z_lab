@@ -10,10 +10,11 @@ from cli_args import add_common_args, checkpoint_path, parse_task_configs
 from supermimic.algorithms.models import MultiEncoderAE, TaskSpec
 from supermimic.algorithms.representations import extract_actor_goal
 from supermimic.envs.isaaclab_adapter import IsaacLabSuperMimicAdapter
-from supermimic.runners.exporter import export_actor_as_onnx
+from supermimic.runners.exporter import export_actor
 from supermimic.tasks import VelocityTaskCfg, advance_proprio_history, build_actor_obs_td
 
 from isaaclab.app import launch_simulation
+from isaaclab.utils.io import load_yaml
 
 
 def main() -> None:
@@ -25,6 +26,11 @@ def main() -> None:
     args, env_cfg, agent_cfg = parse_task_configs(parser, play=True)
     log_root = args.run_dir / agent_cfg.experiment_name
     path = checkpoint_path(args, log_root, args.checkpoint or "latest")
+    if args.motion_file is None:
+        training_env_path = path.parent / "params" / "env.yaml"
+        if training_env_path.is_file():
+            training_env_cfg = load_yaml(str(training_env_path))
+            env_cfg.commands.motion.motion_file = training_env_cfg["commands"]["motion"]["motion_file"]
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     if checkpoint.get("actor_obs_mode") != "proprio":
         raise ValueError("Playback requires a checkpoint trained with proprioception. Retrain the rep_state actor.")
@@ -34,6 +40,7 @@ def main() -> None:
     history_length = saved_config["history_length"]
     env_cfg.log_dir = str(path.parent)
     print(f"[SuperMimic] loading {path}")
+    print(f"[SuperMimic] motion library: {env_cfg.commands.motion.motion_file}")
 
     with launch_simulation(env_cfg, args):
         env = gym.make(args.task, cfg=env_cfg)
@@ -73,7 +80,7 @@ def main() -> None:
             actor.eval()
             if set(task_names) == {"motion", "velocity"}:
                 velocity_cfg = VelocityTaskCfg(**saved_config["velocity"])
-                exported = export_actor_as_onnx(actor, env, path.parent / "exported", path.stem, velocity_cfg)
+                exported = export_actor(actor, env, path.parent / "exported", path.stem, velocity_cfg)
                 print("[SuperMimic] deployment files written to " + ", ".join(str(file) for file in exported))
             history = observations["actor"].unsqueeze(1).repeat(1, history_length, 1)
             velocity_command = observations["actor"].new_tensor(args.velocity_command).expand(adapter.num_envs, -1)

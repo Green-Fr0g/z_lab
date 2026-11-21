@@ -308,6 +308,7 @@ class StateRepresentation(nn.Module, ABC):
         target_body_lin_vel_w: torch.Tensor,
         target_body_ang_vel_w: torch.Tensor,
         reward_weights: dict[str, float],
+        reward_stds: dict[str, float],
     ) -> torch.Tensor:
         """Compute the rollout reward against a reference body's world state."""
         if self.soft_joint_pos_limits is None:
@@ -326,6 +327,7 @@ class StateRepresentation(nn.Module, ABC):
             self.soft_joint_pos_limits,
             self.dt,
             reward_weights,
+            reward_stds,
         )
 
     @abstractmethod

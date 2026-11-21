@@ -142,6 +142,32 @@ class MotionCommand(MimicMotionCommand):
             raise ValueError("Sampling weights must be finite, nonnegative, and have a positive sum.")
         self._sampling_probs.copy_(probs / probs.sum())
 
+    def _adaptive_sampling_probs(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Record episode failures and return the distribution for the next reset."""
+        failed = self._env.termination_manager.terminated[env_ids] & (self._env.episode_length_buf[env_ids] > 0)
+        frame_bins = self.time_steps[env_ids] * self.bin_count // self.motion.time_step_total
+        self._current_bin_failed.scatter_add_(0, frame_bins, failed.to(self._current_bin_failed.dtype))
+
+        failure_counts = self.bin_failed_count
+        if self.cfg.adaptive_clip > 0.0:
+            failure_counts = failure_counts.clamp_max(self.cfg.adaptive_clip * failure_counts.mean())
+        weights = failure_counts + self.cfg.adaptive_uniform_ratio / self.bin_count
+        if self.cfg.adaptive_kernel_size > 1:
+            weights = torch.nn.functional.pad(
+                weights.view(1, 1, -1), (0, self.cfg.adaptive_kernel_size - 1), mode="replicate"
+            )
+            weights = torch.nn.functional.conv1d(weights, self.kernel.view(1, 1, -1)).flatten()
+        total = weights.sum()
+        probs = torch.where(total > 0, weights / total, 1.0 / self.bin_count)
+
+        top_prob, top_bin = probs.max(dim=0)
+        self.metrics["sampling_entropy"][:] = (
+            torch.special.entr(probs).sum() / math.log(self.bin_count) if self.bin_count > 1 else 1.0
+        )
+        self.metrics["sampling_top1_prob"][:] = top_prob
+        self.metrics["sampling_top1_bin"][:] = top_bin / self.bin_count
+        return probs
+
     def _resample_command(self, env_ids: Sequence[int] | slice) -> None:
         if isinstance(env_ids, slice):
             env_ids = torch.arange(self.num_envs, device=self.device)[env_ids]
@@ -154,8 +180,11 @@ class MotionCommand(MimicMotionCommand):
         if self.cfg.sampling_mode == "start":
             start = self.motion.motion_starts[self.cfg.play_clip] + self.cfg.play_frame
             frames = start.expand(count)
-        elif self.cfg.sampling_mode == "external":
-            bins = torch.multinomial(self._sampling_probs, count, replacement=True)
+        elif self.cfg.sampling_mode in ("adaptive", "external"):
+            probs = (
+                self._adaptive_sampling_probs(env_ids) if self.cfg.sampling_mode == "adaptive" else self._sampling_probs
+            )
+            bins = torch.multinomial(probs, count, replacement=True)
             fractions = (bins + torch.rand(count, device=self.device)) / self.bin_count
             frames = (fractions * self.motion.time_step_total).long().clamp_max(self.motion.time_step_total - 1)
             frames = torch.minimum(frames, self.motion.clip_end(frames) - 2)
@@ -197,6 +226,9 @@ class MotionCommand(MimicMotionCommand):
         next_frames = self.time_steps + (self._env.episode_length_buf > 0)
         self.time_steps.copy_(torch.minimum(next_frames, self.motion.clip_end(self.time_steps) - 1))
         self.body_pos_relative_w, self.body_quat_relative_w = self.aligned_body_poses()
+        if self.cfg.sampling_mode == "adaptive":
+            self.bin_failed_count.lerp_(self._current_bin_failed, self.cfg.adaptive_alpha)
+            self._current_bin_failed.zero_()
 
 
 @configclass
@@ -205,6 +237,8 @@ class MotionCommandCfg(MimicMotionCommandCfg):
 
     class_type: type = MotionCommand
     motion_file: str | list[str]
-    sampling_mode: Literal["start", "uniform", "external"] = "uniform"
+    sampling_mode: Literal["start", "uniform", "external", "adaptive"] = "uniform"
+    adaptive_clip: float = 100.0
+    """Cap per-bin failure counts at this multiple of their mean. Use zero to disable the cap."""
     play_clip: int = 0
     play_frame: int = 0

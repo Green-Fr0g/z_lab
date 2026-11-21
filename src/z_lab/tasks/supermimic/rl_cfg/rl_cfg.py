@@ -18,10 +18,10 @@ class SuperMimicWorldModelCfg:
     nominal_root_orientation_error: float = 0.02
     nominal_joint_position_error: float = 0.1
     nominal_joint_velocity_error: float = 3.14
-    nominal_body_position_error: float = 0.01
-    nominal_body_orientation_error: float = 0.02
-    nominal_body_linear_velocity_error: float = 0.1
-    nominal_body_angular_velocity_error: float = 0.1
+    nominal_body_position_error: float = 0.05
+    nominal_body_orientation_error: float = 0.1
+    nominal_body_linear_velocity_error: float = 1.0
+    nominal_body_angular_velocity_error: float = 3.14
     max_grad_norm: float = 1.0
 
 
@@ -92,7 +92,7 @@ class SuperMimicRunnerCfg:
     save_interval: int = 1000
     replay_buffer_size: int = 1000
     replay_ratio: float = 16.0
-    sampling_mode: Literal["return", "uniform", "start"] = "return"
+    sampling_mode: Literal["return", "uniform", "start", "adaptive"] = "return"
     history_length: int = 1
     action_noise: float = 0.1
     dynamics_hidden_dims: tuple[int, ...] = (2048, 2048, 2048)

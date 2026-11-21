@@ -26,10 +26,10 @@ class WorldModelLearnerCfg:
     nominal_root_orientation_error: float = 0.02
     nominal_joint_position_error: float = 0.1
     nominal_joint_velocity_error: float = 3.14
-    nominal_body_position_error: float = 0.01
-    nominal_body_orientation_error: float = 0.02
-    nominal_body_linear_velocity_error: float = 0.1
-    nominal_body_angular_velocity_error: float = 0.1
+    nominal_body_position_error: float = 0.05
+    nominal_body_orientation_error: float = 0.1
+    nominal_body_linear_velocity_error: float = 1.0
+    nominal_body_angular_velocity_error: float = 3.14
     max_grad_norm: float = 1.0
 
 

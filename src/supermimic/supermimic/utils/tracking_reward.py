@@ -41,6 +41,7 @@ def tracking_reward(
     soft_joint_pos_limits: torch.Tensor,
     step_dt: float,
     weights: dict[str, float],
+    stds: dict[str, float],
 ) -> torch.Tensor:
     """Compute the motion-tracking and regularization reward for one step."""
     pred_pos, pred_rot, pred_lin_vel, pred_ang_vel = predicted_bodies
@@ -56,15 +57,7 @@ def tracking_reward(
         "motion_body_lin_vel": (pred_lin_vel - target_lin_vel).square().sum(-1).mean(-1),
         "motion_body_ang_vel": (pred_ang_vel - target_ang_vel).square().sum(-1).mean(-1),
     }
-    standards = {
-        "motion_global_anchor_pos": 0.3,
-        "motion_global_anchor_ori": 0.4,
-        "motion_body_pos": 0.3,
-        "motion_body_ori": 0.4,
-        "motion_body_lin_vel": 1.0,
-        "motion_body_ang_vel": 3.14,
-    }
-    reward = sum(weights[name] * torch.exp(-error / standards[name] ** 2) for name, error in errors.items())
+    reward = sum(weights[name] * torch.exp(-error / stds[name] ** 2) for name, error in errors.items())
     lower, upper = soft_joint_pos_limits.unbind(-1)
     limit_error = ((lower - joint_positions).clamp_min(0) + (joint_positions - upper).clamp_min(0)).sum(-1)
     action_rate = (action - last_action).square().sum(-1)

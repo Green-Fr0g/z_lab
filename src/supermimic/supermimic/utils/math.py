@@ -147,8 +147,8 @@ def quat_yaw(quaternion: torch.Tensor) -> torch.Tensor:
 def quat_integrate(quaternion: torch.Tensor, angular_velocity: torch.Tensor, dt: float) -> torch.Tensor:
     """Integrate an xyzw orientation by a world-frame angular velocity."""
     rotation = angular_velocity * dt
-    angle = torch.linalg.vector_norm(rotation, dim=-1, keepdim=True)
+    angle = torch.sqrt(rotation.square().sum(dim=-1, keepdim=True) + 1e-8)
     half_angle = angle * 0.5
-    scale = torch.where(angle > 1e-8, torch.sin(half_angle) / angle, 0.5 - angle.square() / 48)
-    delta = torch.cat((rotation * scale, torch.cos(half_angle)), dim=-1)
+    axis = rotation / angle
+    delta = torch.cat((torch.sin(half_angle) * axis, torch.cos(half_angle)), dim=-1)
     return torch.nn.functional.normalize(quat_mul(delta, quaternion), dim=-1)

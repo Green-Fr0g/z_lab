@@ -25,6 +25,7 @@ class WorldModelEnv(ABC):
         batch_size: int,
         soft_joint_pos_limits: torch.Tensor,
         reward_weights: dict[str, float],
+        reward_stds: dict[str, float],
         anchor_pos_threshold: float,
         anchor_ori_threshold: float,
         termination_softness: float = 0.05,
@@ -48,6 +49,7 @@ class WorldModelEnv(ABC):
         self.history_length = history_length
         self.soft_joint_pos_limits = soft_joint_pos_limits
         self.reward_weights = reward_weights
+        self.reward_stds = reward_stds
         self.anchor_pos_threshold = anchor_pos_threshold
         self.anchor_ori_threshold = anchor_ori_threshold
         self.termination_softness = termination_softness
@@ -118,7 +120,8 @@ class WorldModelEnv(ABC):
             action,
             self.last_action,
             *self._ref_body_state,
-            self.reward_weights,
+            reward_weights=self.reward_weights,
+            reward_stds=self.reward_stds,
         )
         termination = self._compute_term_prob(next_aux)
         return next_aux, next_rep, next_joint_state, reward, termination

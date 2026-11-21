@@ -60,7 +60,7 @@ class SuperMimicRunnerCfg(BaseRunnerCfg):
     latent_bc_weight: float
     slot_mix: dict[str, float]
     velocity: VelocityTaskCfg
-    sampling_mode: Literal["return", "uniform", "start"]
+    sampling_mode: Literal["return", "uniform", "start", "adaptive"]
     policy: BpttPolicyLearnerCfg | ActorCriticPolicyLearnerCfg
     return_sampler: ReturnSamplerCfg
 
@@ -236,6 +236,13 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         cfg = self.cfg
         self.num_goal_frames, self.goal_frame_stride = self.adapter.motion_goal_window()
         self.actor = build_actor(cfg, self._wm, self.num_goal_frames, self.adapter.device)
+        for batch_name, batch_size in (("simulator", self.adapter.num_envs), ("policy", cfg.policy.batch_size)):
+            for task_name, (start, stop) in zip(self.actor.task_names, self.actor.slot_ranges(batch_size), strict=True):
+                if start == stop:
+                    raise ValueError(
+                        f"slot_mix={cfg.slot_mix} assigns no slots to {task_name!r} "
+                        f"in the {batch_name} batch of size {batch_size}"
+                    )
         thresholds = self.env.cfg.terminations
         self.world_model_env = MultiTaskWorldModelEnv(
             dynamics=self.dynamics,
@@ -245,6 +252,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
             batch_size=cfg.policy.batch_size,
             soft_joint_pos_limits=self.adapter.soft_joint_pos_limits(),
             reward_weights=self.adapter.reward_weights(),
+            reward_stds=self.adapter.reward_stds(),
             anchor_pos_threshold=thresholds.anchor_pos.params["threshold"],
             anchor_ori_threshold=thresholds.anchor_ori.params["threshold"],
             num_goal_frames=self.num_goal_frames,

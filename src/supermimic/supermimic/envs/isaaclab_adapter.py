@@ -9,6 +9,15 @@ import torch
 from supermimic.algorithms.representations import PROPRIO_OBS_TERMS
 from supermimic.kinematics import RobotModel, load_robot_model
 
+_TRACKING_REWARD_NAMES = (
+    "motion_global_anchor_pos",
+    "motion_global_anchor_ori",
+    "motion_body_pos",
+    "motion_body_ori",
+    "motion_body_lin_vel",
+    "motion_body_ang_vel",
+)
+
 
 class IsaacLabSuperMimicAdapter:
     """Adapt the registered manager-based task to the SuperMimic data contract."""
@@ -157,17 +166,13 @@ class IsaacLabSuperMimicAdapter:
     def reward_weights(self) -> dict[str, float]:
         """Return task-configured tracking and regularization weights."""
         rewards = self.env.cfg.rewards
-        names = (
-            "motion_global_anchor_pos",
-            "motion_global_anchor_ori",
-            "motion_body_pos",
-            "motion_body_ori",
-            "motion_body_lin_vel",
-            "motion_body_ang_vel",
-            "action_rate_l2",
-            "joint_limit",
-        )
+        names = (*_TRACKING_REWARD_NAMES, "action_rate_l2", "joint_limit")
         return {name: float(getattr(rewards, name).weight) for name in names}
+
+    def reward_stds(self) -> dict[str, float]:
+        """Return the tracking reward standard deviations from the task config."""
+        rewards = self.env.cfg.rewards
+        return {name: float(getattr(rewards, name).params["std"]) for name in _TRACKING_REWARD_NAMES}
 
     def step(
         self, actions: torch.Tensor

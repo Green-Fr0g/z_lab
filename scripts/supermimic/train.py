@@ -36,6 +36,8 @@ def build_runner_cfg(agent_cfg: AgentCfg) -> SuperMimicRunnerCfg:
             del policy[key]
     else:
         raise ValueError(f"Unknown SuperMimic policy learner {kind!r}")
+    if policy["gamma"] is None:
+        del policy["gamma"]
     return SuperMimicRunnerCfg(
         **{
             **values,
@@ -65,16 +67,15 @@ def main() -> None:
         if not 0.0 < args.motion_rate < 1.0:
             parser.error("--motion_rate must be between 0 and 1 (exclusive)")
         agent_cfg.slot_mix = {"motion": args.motion_rate, "velocity": 1.0 - args.motion_rate}
-    if agent_cfg.policy.gamma is None:
-        agent_cfg.policy.gamma = 0.99 if agent_cfg.policy.kind == "actor-critic" else 1.0
-    if agent_cfg.sampling_mode not in ("return", "uniform", "start"):
-        parser.error("sampling_mode must be 'return', 'uniform' or 'start'")
+    if agent_cfg.sampling_mode not in ("return", "uniform", "start", "adaptive"):
+        parser.error("sampling_mode must be 'return', 'uniform', 'start', or 'adaptive'")
     if min(agent_cfg.max_iterations, agent_cfg.log_interval, agent_cfg.save_interval) <= 0:
         parser.error("max_iterations, log_interval and save_interval must be positive")
     if agent_cfg.replay_buffer_size < max(2, agent_cfg.world_model.horizon, agent_cfg.history_length):
         parser.error("Replay capacity must cover the world-model horizon and actor history")
 
     cfg = build_runner_cfg(agent_cfg)
+    agent_cfg.policy.gamma = cfg.policy.gamma
     env_cfg.commands.motion.sampling_mode = "external" if cfg.sampling_mode == "return" else cfg.sampling_mode
     log_root = args.run_dir / agent_cfg.experiment_name
     resume_path = checkpoint_path(args, log_root, args.checkpoint) if args.checkpoint else None

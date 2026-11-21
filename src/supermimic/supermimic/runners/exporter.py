@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import onnx
@@ -40,65 +42,36 @@ class _SingleTaskActor(nn.Module):
         return self.decoder(torch.cat((latent, normalized_history.flatten(start_dim=1)), dim=-1))
 
 
-class _MotionDeployActor(nn.Module):
-    """Motion actor plus frame-indexed reference data for tracking deployment."""
-
-    def __init__(self, actor: MultiEncoderAE, motion_command: Any, term_widths: tuple[int, ...]) -> None:
-        super().__init__()
-        self.actor = _SingleTaskActor(actor, "motion", term_widths)
-        motion = motion_command.motion
-        joint_indices = motion_command.joint_indexes
-        frames = torch.arange(motion.time_step_total, device=motion.joint_pos.device)
-        body_pos, body_quat, body_lin_vel, body_ang_vel = motion.body_state(frames)
-        self.register_buffer("joint_pos", motion.joint_pos[:, joint_indices].detach().cpu())
-        self.register_buffer("joint_vel", motion.joint_vel[:, joint_indices].detach().cpu())
-        self.register_buffer("body_pos_w", body_pos.detach().cpu())
-        self.register_buffer("body_quat_w", body_quat.detach().cpu())
-        self.register_buffer("body_lin_vel_w", body_lin_vel.detach().cpu())
-        self.register_buffer("body_ang_vel_w", body_ang_vel.detach().cpu())
-        self.num_frames = int(self.joint_pos.shape[0])
-
-    def forward(self, observation: torch.Tensor, time_step: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        frame = time_step.long().reshape(-1).clamp(0, self.num_frames - 1)
-        return (
-            self.actor(observation),
-            self.joint_pos[frame],
-            self.joint_vel[frame],
-            self.body_pos_w[frame],
-            self.body_quat_w[frame],
-            self.body_lin_vel_w[frame],
-            self.body_ang_vel_w[frame],
-        )
-
-
-def _write_onnx(
-    module: nn.Module,
-    sample_inputs: tuple[torch.Tensor, ...],
-    input_names: list[str],
-    output_names: list[str],
-    path: Path,
+@torch.no_grad()
+def _write_policy(
+    module: _SingleTaskActor,
+    sample_observation: torch.Tensor,
+    onnx_path: Path,
+    jit_path: Path,
     metadata: dict[str, Any],
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     cpu_module = copy.deepcopy(module).cpu().eval()
     torch.onnx.export(
         cpu_module,
-        sample_inputs,
-        str(path),
+        (sample_observation,),
+        str(onnx_path),
         export_params=True,
         opset_version=18,
-        input_names=input_names,
-        output_names=output_names,
+        input_names=["obs"],
+        output_names=["actions"],
         dynamic_axes={},
         dynamo=False,
     )
-    model = onnx.load(str(path))
+    model = onnx.load(str(onnx_path))
     for key, value in metadata.items():
         entry = onnx.StringStringEntryProto()
         entry.key = key
         entry.value = _metadata_value(value)
         model.metadata_props.append(entry)
-    onnx.save(model, str(path))
+    onnx.save(model, str(onnx_path))
+
+    traced = torch.jit.trace(cpu_module, (sample_observation,))
+    torch.jit.save(traced, str(jit_path), _extra_files={"metadata.json": json.dumps(metadata)})
 
 
 def _metadata_value(value: Any) -> str:
@@ -120,14 +93,14 @@ def _metadata_scalar(value: Any) -> str:
     return str(value)
 
 
-def export_actor_as_onnx(
+def export_actor(
     actor: MultiEncoderAE,
     env: Any,
     path: str | Path,
     run_name: str,
     velocity_cfg: VelocityTaskCfg,
 ) -> list[Path]:
-    """Write motion-tracking and velocity-command ONNX policies."""
+    """Write one ONNX and one TorchScript policy per encoder."""
     if set(actor.task_names) != {"motion", "velocity"}:
         raise ValueError("deployment export requires motion and velocity encoders")
     env = env.unwrapped
@@ -176,46 +149,15 @@ def export_actor_as_onnx(
         "history_length": actor.history_length,
         "goal_stride": goal_params["frame_stride"],
     }
-    motion_policy = _MotionDeployActor(actor, motion_command, term_widths)
-    motion_obs_dim = actor.obs_dim * actor.history_length + goal_dims["motion"]
-    motion_path = output_dir / "policy_motion.onnx"
-    _write_onnx(
-        motion_policy,
-        (torch.zeros(1, motion_obs_dim), torch.zeros(1, 1)),
-        ["obs", "time_step"],
-        [
-            "actions",
-            "joint_pos",
-            "joint_vel",
-            "body_pos_w",
-            "body_quat_w",
-            "body_lin_vel_w",
-            "body_ang_vel_w",
-        ],
-        motion_path,
-        {
-            **common_metadata,
-            "task": "motion",
+    task_metadata = {
+        "motion": {
             "num_goal_frames": goal_params["num_frames"],
             "observation_names": actor_terms + [name for name, _ in motion_terms],
             "observation_history_lengths": actor_history_lengths + [1] * len(motion_terms),
             "observation_term_widths": list(term_widths) + [width for _, width in motion_terms],
             "observation_layout": "term-major proprioception (oldest to newest) followed by motion goal",
         },
-    )
-
-    velocity_actor = _SingleTaskActor(actor, "velocity", term_widths)
-    velocity_obs_dim = actor.obs_dim * actor.history_length + goal_dims["velocity"]
-    velocity_path = output_dir / "policy_velocity.onnx"
-    _write_onnx(
-        velocity_actor,
-        (torch.zeros(1, velocity_obs_dim),),
-        ["obs"],
-        ["actions"],
-        velocity_path,
-        {
-            **common_metadata,
-            "task": "velocity",
+        "velocity": {
             "observation_names": actor_terms + ["command"],
             "observation_history_lengths": actor_history_lengths + [1],
             "observation_term_widths": list(term_widths) + [goal_dims["velocity"]],
@@ -227,5 +169,22 @@ def export_actor_as_onnx(
                 velocity_cfg.ang_vel_z_range,
             ],
         },
-    )
-    return [motion_path, velocity_path]
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    exported: list[Path] = []
+    with TemporaryDirectory(dir=output_dir) as temporary_dir:
+        staging_dir = Path(temporary_dir)
+        for task_name, metadata in task_metadata.items():
+            policy = _SingleTaskActor(actor, task_name, term_widths)
+            sample_observation = torch.zeros(1, policy.history_size + goal_dims[task_name])
+            onnx_path = staging_dir / f"policy_{task_name}.onnx"
+            jit_path = staging_dir / f"policy_{task_name}.pt"
+            _write_policy(
+                policy,
+                sample_observation,
+                onnx_path,
+                jit_path,
+                {**common_metadata, "task": task_name, **metadata},
+            )
+            exported.extend((onnx_path, jit_path))
+        return [path.replace(output_dir / path.name) for path in exported]
