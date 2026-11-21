@@ -52,36 +52,19 @@ def main() -> None:
     add_common_args(parser)
     parser.add_argument("--max_iterations", "--max-iterations", type=int)
     parser.add_argument("--run_name", "--run-name")
-    parser.add_argument("--sampling-mode", choices=("return", "uniform", "start"))
-    parser.add_argument("--buffer-size", type=int)
     parser.add_argument("--replay-ratio", type=float)
-    parser.add_argument("--wm-batch-size", type=int)
-    parser.add_argument("--wm-num-batches", type=int)
-    parser.add_argument("--wm-horizon", type=int)
-    parser.add_argument("--policy-batch-size", type=int)
-    parser.add_argument("--policy-horizon", type=int)
-    parser.add_argument("--policy-learner", choices=("actor-critic", "bptt"))
-    parser.add_argument("--history-length", type=int)
-    parser.add_argument("--motion-slot-fraction", type=float)
+    parser.add_argument("--motion_rate", type=float, help="Fraction of training slots assigned to Motion.")
     args, env_cfg, agent_cfg = parse_task_configs(parser)
-    for obj, field, override in (
-        (agent_cfg, "max_iterations", args.max_iterations),
-        (agent_cfg, "run_name", args.run_name),
-        (agent_cfg, "sampling_mode", args.sampling_mode),
-        (agent_cfg, "replay_buffer_size", args.buffer_size),
-        (agent_cfg, "replay_ratio", args.replay_ratio),
-        (agent_cfg, "history_length", args.history_length),
-        (agent_cfg.world_model, "batch_size", args.wm_batch_size),
-        (agent_cfg.world_model, "num_batches", args.wm_num_batches),
-        (agent_cfg.world_model, "horizon", args.wm_horizon),
-        (agent_cfg.policy, "batch_size", args.policy_batch_size),
-        (agent_cfg.policy, "horizon", args.policy_horizon),
-        (agent_cfg.policy, "kind", args.policy_learner),
-    ):
-        if override is not None:
-            setattr(obj, field, override)
-    if args.motion_slot_fraction is not None:
-        agent_cfg.slot_mix = {"motion": args.motion_slot_fraction, "velocity": 1.0 - args.motion_slot_fraction}
+    if args.max_iterations is not None:
+        agent_cfg.max_iterations = args.max_iterations
+    if args.run_name is not None:
+        agent_cfg.run_name = args.run_name
+    if args.replay_ratio is not None:
+        agent_cfg.replay_ratio = args.replay_ratio
+    if args.motion_rate is not None:
+        if not 0.0 < args.motion_rate < 1.0:
+            parser.error("--motion_rate must be between 0 and 1 (exclusive)")
+        agent_cfg.slot_mix = {"motion": args.motion_rate, "velocity": 1.0 - args.motion_rate}
     if agent_cfg.policy.gamma is None:
         agent_cfg.policy.gamma = 0.99 if agent_cfg.policy.kind == "actor-critic" else 1.0
     if agent_cfg.sampling_mode not in ("return", "uniform", "start"):

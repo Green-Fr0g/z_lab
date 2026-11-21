@@ -163,6 +163,7 @@ def export_actor_as_onnx(
     if not isinstance(action_scale, list):
         action_scale = [float(action_scale)] * actor.decoder[-1].out_features
 
+    goal_params = env.cfg.observations.goal.command.params
     common_metadata = {
         "run_name": run_name,
         "joint_names": list(action_term._joint_names),
@@ -173,7 +174,7 @@ def export_actor_as_onnx(
         "quaternion_order": "xyzw",
         "actor_obs_mode": "proprio",
         "history_length": actor.history_length,
-        "goal_stride": env.cfg.observations.goal.command.params["frame_stride"],
+        "goal_stride": goal_params["frame_stride"],
     }
     motion_policy = _MotionDeployActor(actor, motion_command, term_widths)
     motion_obs_dim = actor.obs_dim * actor.history_length + goal_dims["motion"]
@@ -195,6 +196,7 @@ def export_actor_as_onnx(
         {
             **common_metadata,
             "task": "motion",
+            "num_goal_frames": goal_params["num_frames"],
             "observation_names": actor_terms + [name for name, _ in motion_terms],
             "observation_history_lengths": actor_history_lengths + [1] * len(motion_terms),
             "observation_term_widths": list(term_widths) + [width for _, width in motion_terms],

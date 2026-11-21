@@ -109,11 +109,17 @@ class GoalCfg(ObsGroup):
     )
     motion_anchor_pos_b = ObsTerm(
         func=mdp.motion_anchor_pos_window,
-        params={"num_frames": 10, "frame_stride": 5},
+        params={
+            "num_frames": command.params["num_frames"],
+            "frame_stride": command.params["frame_stride"],
+        },
     )
     motion_anchor_ori_b = ObsTerm(
         func=mdp.motion_anchor_ori_window,
-        params={"num_frames": 10, "frame_stride": 5},
+        params={
+            "num_frames": command.params["num_frames"],
+            "frame_stride": command.params["frame_stride"],
+        },
     )
 
     def __post_init__(self) -> None:
