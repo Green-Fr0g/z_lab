@@ -4,7 +4,7 @@ import onnx
 import torch
 from onnx.reference import ReferenceEvaluator
 from supermimic.algorithms.models import MultiEncoderAE, TaskSpec
-from supermimic.runners.exporter import export_actor_as_onnx
+from supermimic.runners.exporter import export_actor
 from supermimic.tasks import VelocityTaskCfg, build_actor_obs_td, velocity_goal_from_motion
 
 
@@ -34,24 +34,8 @@ def test_velocity_goal_uses_centered_body_frame_motion_velocity():
     torch.testing.assert_close(goal, torch.tensor([[0.0, -2.0, 0.2]]), atol=1e-6, rtol=0.0)
 
 
-def test_exporter_writes_motion_and_velocity_onnx_contracts(tmp_path):
-    class Motion:
-        time_step_total = 4
-        joint_pos = torch.arange(8, dtype=torch.float32).reshape(4, 2)
-        joint_vel = torch.ones_like(joint_pos)
-
-        def body_state(self, frames):
-            count = len(frames)
-            pos = torch.zeros(count, 2, 3)
-            quat_xyzw = torch.zeros(count, 2, 4)
-            quat_xyzw[..., 3] = 1.0
-            velocity = torch.zeros_like(pos)
-            return pos, quat_xyzw, velocity, velocity
-
-    motion = Motion()
+def test_exporter_writes_motion_and_velocity_policies(tmp_path):
     motion_command = SimpleNamespace(
-        motion=motion,
-        joint_indexes=torch.tensor([1, 0]),
         cfg=SimpleNamespace(body_names=["pelvis", "torso_link"], anchor_body_name="pelvis"),
     )
     action_term = SimpleNamespace(
@@ -71,7 +55,9 @@ def test_exporter_writes_motion_and_velocity_onnx_contracts(tmp_path):
                 group_obs_term_dim={"actor": [(3,), (3,), (2,), (2,), (2,)], "goal": [(4,), (3,), (6,)]},
             ),
             cfg=SimpleNamespace(
-                observations=SimpleNamespace(goal=SimpleNamespace(command=SimpleNamespace(params={"frame_stride": 5})))
+                observations=SimpleNamespace(
+                    goal=SimpleNamespace(command=SimpleNamespace(params={"num_frames": 1, "frame_stride": 5}))
+                )
             ),
         )
     )
@@ -85,40 +71,39 @@ def test_exporter_writes_motion_and_velocity_onnx_contracts(tmp_path):
         history_length=2,
     )
 
-    paths = export_actor_as_onnx(actor, env, tmp_path, "run", VelocityTaskCfg())
+    paths = export_actor(actor, env, tmp_path, "run", VelocityTaskCfg())
 
-    assert [path.name for path in paths] == ["policy_motion.onnx", "policy_velocity.onnx"]
-    motion_model, velocity_model = (onnx.load(str(path)) for path in paths)
-    onnx.checker.check_model(motion_model)
-    onnx.checker.check_model(velocity_model)
-    assert [value.name for value in motion_model.graph.input] == ["obs", "time_step"]
-    assert [value.name for value in motion_model.graph.output] == [
-        "actions",
-        "joint_pos",
-        "joint_vel",
-        "body_pos_w",
-        "body_quat_w",
-        "body_lin_vel_w",
-        "body_ang_vel_w",
-    ]
-    assert [value.name for value in velocity_model.graph.input] == ["obs"]
-    assert [value.name for value in velocity_model.graph.output] == ["actions"]
-    metadata = {entry.key: entry.value for entry in velocity_model.metadata_props}
-    assert metadata["observation_names"] == "projected_gravity,base_ang_vel,joint_pos,joint_vel,actions,command"
-    assert metadata["observation_history_lengths"] == "2,2,2,2,2,1"
-    assert metadata["command_names"] == "lin_vel_x,lin_vel_y,ang_vel_z"
+    assert {path.name for path in paths} == {
+        "policy_motion.onnx",
+        "policy_motion.pt",
+        "policy_velocity.onnx",
+        "policy_velocity.pt",
+    }
 
     history = torch.arange(24, dtype=torch.float32).reshape(1, 2, 12) / 10
     packed = torch.cat([part.flatten(1) for part in history.split((3, 3, 2, 2, 2), dim=-1)], dim=-1)
-    velocity = torch.tensor([[0.1, -0.2, 0.3]])
+    goals = {"motion": torch.linspace(-1.0, 1.0, 10).unsqueeze(0), "velocity": torch.tensor([[0.1, -0.2, 0.3]])}
     actor.eval()
-    actor.set_slot_mix({"velocity": 1.0})
-    with torch.no_grad():
-        expected = actor(build_actor_obs_td({"velocity": velocity}, history))
-    velocity_input = torch.cat((packed, velocity), dim=-1).numpy()
-    (actions,) = ReferenceEvaluator(velocity_model).run(None, {"obs": velocity_input})
-    torch.testing.assert_close(torch.from_numpy(actions), expected)
+    for task, goal in goals.items():
+        model = onnx.load(str(tmp_path / f"policy_{task}.onnx"))
+        onnx.checker.check_model(model)
+        assert [value.name for value in model.graph.input] == ["obs"]
+        assert [value.name for value in model.graph.output] == ["actions"]
+        metadata = {entry.key: entry.value for entry in model.metadata_props}
+        assert metadata["task"] == task
+        if task == "motion":
+            assert metadata["observation_names"].split(",")[-2:] == ["command", "motion_anchor_ori_b"]
+            assert metadata["num_goal_frames"] == "1"
+        else:
+            assert metadata["observation_names"] == "projected_gravity,base_ang_vel,joint_pos,joint_vel,actions,command"
+            assert metadata["observation_history_lengths"] == "2,2,2,2,2,1"
+            assert metadata["command_names"] == "lin_vel_x,lin_vel_y,ang_vel_z"
 
-    motion_input = torch.cat((packed, torch.zeros(1, 10)), dim=-1).numpy()
-    outputs = ReferenceEvaluator(motion_model).run(None, {"obs": motion_input, "time_step": torch.ones(1, 1).numpy()})
-    torch.testing.assert_close(torch.from_numpy(outputs[1]), torch.tensor([[3.0, 2.0]]))
+        observation = torch.cat((packed, goal), dim=-1)
+        actor.set_slot_mix({task: 1.0})
+        scripted = torch.jit.load(str(tmp_path / f"policy_{task}.pt"))
+        with torch.no_grad():
+            expected = actor(build_actor_obs_td({task: goal}, history))
+            torch.testing.assert_close(scripted(observation), expected)
+        (actions,) = ReferenceEvaluator(model).run(None, {"obs": observation.numpy()})
+        torch.testing.assert_close(torch.from_numpy(actions), expected)

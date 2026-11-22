@@ -291,6 +291,14 @@ def test_actor_critic_updates_through_g1_model_rollout(g1_fk):
         "action_rate_l2": -0.1,
         "joint_limit": -2.0,
     }
+    reward_stds = {
+        "motion_global_anchor_pos": 0.3,
+        "motion_global_anchor_ori": 0.4,
+        "motion_body_pos": 0.3,
+        "motion_body_ori": 0.4,
+        "motion_body_lin_vel": 1.0,
+        "motion_body_ang_vel": 3.14,
+    }
     task_specs = [TaskSpec("motion", 640), TaskSpec("velocity", 3)]
     world_env = MultiTaskWorldModelEnv(
         dynamics,
@@ -300,6 +308,7 @@ def test_actor_critic_updates_through_g1_model_rollout(g1_fk):
         batch_size=2,
         soft_joint_pos_limits=joint_limits,
         reward_weights=reward_weights,
+        reward_stds=reward_stds,
         anchor_pos_threshold=0.25,
         anchor_ori_threshold=0.8,
         task_specs=task_specs,
