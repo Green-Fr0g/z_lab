@@ -128,8 +128,9 @@ uv run python scripts/supermimic/train.py --task ZLab-SuperMimic-GenCoord-G1 --w
 uv run --extra viser python scripts/supermimic/play.py --task ZLab-SuperMimic-GenCoord-G1 --checkpoint ./model.pt --viz viser
 ```
 
-`--task-encoder motion` 默认显示蓝色参考动作影子和橙色世界模型影子，二者随真实环境的 episode 重置同步更新。
-`--task-encoder velocity` 默认关闭两个影子，并在每个环境重置时独立采样一条机身坐标系速度指令，在该 episode 内保持固定。
+`--task-encoder motion` 默认播放所选片段到末帧，并显示蓝色参考动作影子和橙色世界模型影子。可用 `--num-steps` 指定播放步数。
+橙色影子每步以真实机器人的当前状态和即将执行的动作预测下一帧。SuperMimic 播放关闭继承自 Mimic 的参考关节标记。
+`--task-encoder velocity` 默认关闭两个影子，使用 `UniformVelocityCommandCfg` 在训练配置的范围内生成机身坐标系速度指令，每 10 秒及环境重置时重新采样。
 用 `--velocity-command VX VY WZ` 指定固定指令，例如 `--velocity-command 0 0 0`。
 可通过 `--show-reference-shadow`、`--show-world-model-shadow` 和对应的 `--no-show-*` 参数覆盖显示默认值。
 

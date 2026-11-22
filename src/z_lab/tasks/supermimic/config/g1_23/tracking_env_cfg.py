@@ -1,5 +1,7 @@
 """Bind the G1 23-DOF asset and reference motion to the SuperMimic environments."""
 
+from pathlib import Path
+
 from isaaclab.utils import configclass
 
 from z_lab.assets.robots.g1_23 import (
@@ -10,13 +12,14 @@ from z_lab.assets.robots.g1_23 import (
     MIMIC_G1_23DOF_ACTION_SCALE,
     MIMIC_G1_23DOF_CFG,
 )
-from z_lab.tasks.mimic.config.g1_23.tracking_env_cfg import MOTION_FILE
 from z_lab.tasks.supermimic.tracking_env_cfg import (
     GenCoordStateCfg,
     MaxCoordStateCfg,
     ObservationsCfg,
     SuperMimicGenCoordEnvCfg,
 )
+
+MOTIONS_DIR = Path(__file__).resolve().parent / "motions"
 
 
 @configclass
@@ -29,7 +32,7 @@ class G1_23DOFSuperMimicGenCoordEnvCfg(SuperMimicGenCoordEnvCfg):
         self.actions.joint_pos.joint_names = G1_23DOF_DOF_ORDER
         self.actions.joint_pos.scale = MIMIC_G1_23DOF_ACTION_SCALE
 
-        self.commands.motion.motion_file = str(MOTION_FILE)
+        self.commands.motion.motion_file = [str(path) for path in sorted(MOTIONS_DIR.glob("*.npz")) if path.is_file()]
         self.commands.motion.anchor_body_name = G1_23DOF_ROOT_LINK_NAME
         self.commands.motion.body_names = G1_23DOF_MIMIC_LINK_NAMES
         self.commands.motion.joint_names = G1_23DOF_DOF_ORDER

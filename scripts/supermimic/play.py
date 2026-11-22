@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import gymnasium as gym
 import numpy as np
@@ -14,10 +14,10 @@ import warp as wp
 import yaml
 from cli_args import add_common_args, checkpoint_path, parse_task_configs
 from isaaclab_visualizers.newton.newton_visualization_markers import NewtonVisualizationMarkers
-from newton.viewer import ViewerBase
+from newton.viewer import ViewerBase, ViewerViser
 from pxr import Usd, UsdGeom, UsdPhysics
 from supermimic.algorithms.models import MultiEncoderAE, TaskSpec
-from supermimic.algorithms.representations import extract_actor_goal
+from supermimic.algorithms.representations import PROPRIO_OBS_TERMS, extract_actor_goal
 from supermimic.envs.isaaclab_adapter import IsaacLabSuperMimicAdapter
 from supermimic.envs.world_model_env import WorldModelRollout
 from supermimic.kinematics import ForwardKinematics, load_robot_model
@@ -27,10 +27,18 @@ from supermimic.tasks import VelocityTaskCfg, advance_proprio_history, build_act
 from supermimic.utils.math import matrix_to_quat, quat_apply, quat_apply_inverse, quat_inv, quat_mul
 
 from isaaclab.app import launch_simulation
+from isaaclab.envs.mdp import UniformVelocityCommandCfg, reset_scene_to_default
+from isaaclab.managers import EventTermCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.sim import PreviewSurfaceCfg, UsdFileCfg
 
+from z_lab.tasks.locomotion.locomotion_env_cfg import TerminationsCfg as LocomotionTerminationsCfg
 from z_lab.tasks.supermimic.tracking_env_cfg import SuperMimicGenCoordEnvCfg
+
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedRLEnv
+
+    from z_lab.tasks.supermimic.rl_cfg import SuperMimicRunnerCfg
 
 
 def load_checkpoint(path: Path, representation: str, task_encoder: str) -> dict:
@@ -59,60 +67,86 @@ def load_training_snapshot(path: Path) -> dict:
         return yaml.load(stream, Loader=SnapshotLoader) or {}
 
 
-def load_training_motion_file(env_cfg: SuperMimicGenCoordEnvCfg, motion_file: Path | None, snapshot: dict) -> None:
-    """Use the training motion library unless the caller supplied a file."""
-    training_motion = snapshot.get("commands", {}).get("motion", {}).get("motion_file")
-    if motion_file is None and training_motion is not None:
-        env_cfg.commands.motion.motion_file = training_motion
-
-
-def build_actor(adapter: IsaacLabSuperMimicAdapter, checkpoint: dict, task_encoder: str) -> MultiEncoderAE:
-    """Restore the actor and route the entire batch through the selected encoder."""
-    observations = adapter.observations()
-    obs_dim = adapter.validate_proprio_layout()
-    adapter.validate_full_state_layout(checkpoint["representation"], observations["full_state"].shape[-1])
-    if list(adapter.action_term._joint_names) != checkpoint["joint_names"]:
+def build_actor(env: ManagerBasedRLEnv, checkpoint: dict, task_encoder: str) -> MultiEncoderAE:
+    """Restore the actor using the robot's proprioception and checkpoint goal dimensions."""
+    action_term = env.action_manager.get_term("joint_pos")
+    if list(action_term._joint_names) != checkpoint["joint_names"]:
         raise ValueError("Checkpoint joints must match the playback task's action order")
-    if list(adapter.motion_command.cfg.body_names) != checkpoint["body_names"]:
-        raise ValueError("Checkpoint links must match the playback task's tracking order")
+    num_actions = action_term.action_dim
+    observations = env.observation_manager
+    term_dims = [(3,), (3,), (num_actions,), (num_actions,), (num_actions,)]
+    if (
+        tuple(observations.active_terms["actor"]) != PROPRIO_OBS_TERMS
+        or observations.group_obs_term_dim["actor"] != term_dims
+    ):
+        raise ValueError("Unexpected SuperMimic actor observation terms or widths")
+    for name in ("joint_pos", "joint_vel"):
+        asset_cfg = getattr(env.cfg.observations.actor, name).params["asset_cfg"]
+        _, joint_names = env.scene[asset_cfg.name].find_joints(
+            asset_cfg.joint_names, preserve_order=asset_cfg.preserve_order
+        )
+        if list(joint_names) != checkpoint["joint_names"]:
+            raise ValueError(f"Actor {name} joints must match the checkpoint joint order")
+
     saved_config = checkpoint["config"]
-    frames, stride = adapter.motion_goal_window()
-    if (frames, stride) != (saved_config["num_goal_frames"], saved_config["goal_frame_stride"]):
-        raise ValueError("Checkpoint Motion window must match the playback task")
-    goal_dim = extract_actor_goal(observations["goal"], frames).shape[-1]
-    goal_dims = {"motion": goal_dim, "velocity": 3}
-    task_names = checkpoint["task_names"]
+    goal_dims = {"velocity": 3}
+    if "motion" in checkpoint["task_names"]:
+        goal_dims["motion"] = saved_config["num_goal_frames"] * (2 * num_actions + 6)
     actor = MultiEncoderAE(
-        obs_dim=obs_dim,
-        action_dim=adapter.num_actions,
-        task_specs=[TaskSpec(name, goal_dims[name]) for name in task_names],
+        obs_dim=env.obs_buf["actor"].shape[-1],
+        action_dim=num_actions,
+        task_specs=[TaskSpec(name, goal_dims[name]) for name in checkpoint["task_names"]],
         slot_mix={task_encoder: 1.0},
         latent_dim=saved_config["latent_dim"],
         hidden_dims=tuple(saved_config["actor_hidden_dims"]),
         history_length=saved_config["history_length"],
-    ).to(adapter.device)
+    ).to(env.device)
     actor.load_state_dict(checkpoint["actor"])
     return actor.eval()
 
 
-def sample_velocity_commands(
-    commands: torch.Tensor,
-    cfg: VelocityTaskCfg,
-    fixed_command: list[float] | None,
-    env_ids: torch.Tensor,
+def configure_motion_playback(env_cfg: SuperMimicGenCoordEnvCfg, motion_file: Path | None, snapshot: dict) -> None:
+    """Use the full reference clip as the Motion episode."""
+    training_motion = snapshot.get("commands", {}).get("motion", {}).get("motion_file")
+    if motion_file is None and training_motion is not None:
+        env_cfg.commands.motion.motion_file = training_motion
+    env_cfg.commands.motion.debug_vis = False
+    env_cfg.terminations.time_out = None
+    env_cfg.terminations.anchor_pos = None
+    env_cfg.terminations.anchor_ori = None
+
+
+def configure_velocity_playback(
+    env_cfg: SuperMimicGenCoordEnvCfg, velocity_cfg: VelocityTaskCfg, fixed_command: list[float] | None
 ) -> None:
-    """Replace commands on reset rows, with a supplied command or independent uniform samples."""
+    """Play from the default robot pose with timed velocity command sampling."""
+    env_cfg.commands.motion = None
+    env_cfg.observations.goal = None
+    env_cfg.observations.full_state = None
+    for name, term in vars(env_cfg.rewards).items():
+        if term is not None and term.params.get("command_name") == "motion":
+            setattr(env_cfg.rewards, name, None)
+    env_cfg.events.reset_scene = EventTermCfg(func=reset_scene_to_default, mode="reset")
+
+    ranges = UniformVelocityCommandCfg.Ranges(
+        lin_vel_x=velocity_cfg.lin_vel_x_range,
+        lin_vel_y=velocity_cfg.lin_vel_y_range,
+        ang_vel_z=velocity_cfg.ang_vel_z_range,
+    )
     if fixed_command is not None:
-        commands[env_ids] = commands.new_tensor(fixed_command)
-        return
-    bounds = commands.new_tensor((cfg.lin_vel_x_range, cfg.lin_vel_y_range, cfg.ang_vel_z_range))
-    lower, upper = bounds.unbind(-1)
-    samples = torch.rand((env_ids.numel(), 3), dtype=commands.dtype, device=commands.device)
-    commands[env_ids] = lower + (upper - lower) * samples
+        forward, lateral, yaw_rate = fixed_command
+        ranges.lin_vel_x = (forward, forward)
+        ranges.lin_vel_y = (lateral, lateral)
+        ranges.ang_vel_z = (yaw_rate, yaw_rate)
+    env_cfg.commands.base_velocity = UniformVelocityCommandCfg(
+        asset_name="robot", resampling_time_range=(10.0, 10.0), ranges=ranges, debug_vis=True
+    )
+    env_cfg.terminations = LocomotionTerminationsCfg()
+    env_cfg.terminations.time_out = None
 
 
 class _ShadowViewer:
-    """Forward marker draws to a Newton viewer with a shared instance opacity."""
+    """Apply uniform opacity and Viser ghost lighting to marker draws."""
 
     def __init__(self, viewer: ViewerBase, opacity: float) -> None:
         self._viewer = viewer
@@ -133,12 +167,19 @@ class _ShadowViewer:
         hidden: bool = False,
     ) -> None:
         opacities = None
-        if xforms is not None and not hidden:
+        viser_viewer = self._viewer if isinstance(self._viewer, ViewerViser) else None
+        if viser_viewer is None and xforms is not None and not hidden:
             count = len(xforms)
             if count not in self._opacities:
                 self._opacities[count] = wp.full(count, self._opacity, dtype=wp.float32, device=self._viewer.device)
             opacities = self._opacities[count]
         self._viewer.log_instances(name, mesh, xforms, scales, colors, materials, hidden=hidden, opacities=opacities)
+        if viser_viewer is not None and xforms is not None and not hidden:
+            handle = viser_viewer._scene_handles[viser_viewer._qualify(name)]
+            if handle.opacity != self._opacity:
+                handle.opacity = self._opacity
+                handle.cast_shadow = False
+                handle.receive_shadow = False
 
 
 class _ShadowNewtonMarkers(NewtonVisualizationMarkers):
@@ -170,9 +211,8 @@ class _ShadowMarkers(VisualizationMarkers):
 
 
 def _create_shadow_markers(
-    name: str, meshes: dict[str, Path], color: tuple[float, float, float]
+    name: str, meshes: dict[str, Path], color: tuple[float, float, float], *, opacity: float = 0.5
 ) -> VisualizationMarkers:
-    opacity = 0.5
     cfg = VisualizationMarkersCfg(
         prim_path=f"/Visuals/SuperMimic/{name}",
         markers={
@@ -251,7 +291,9 @@ class PlaybackShadows:
             _create_shadow_markers("reference_shadow", meshes, (0.15, 0.75, 1.0)) if show_reference else None
         )
         self.world_model = (
-            _create_shadow_markers("world_model_shadow", meshes, (1.0, 0.45, 0.1)) if show_world_model else None
+            _create_shadow_markers("world_model_shadow", meshes, (1.0, 0.45, 0.1), opacity=0.3)
+            if show_world_model
+            else None
         )
         visual_links = tuple(meshes)
         tracked_links = tuple(command.cfg.body_names)
@@ -326,65 +368,58 @@ class PlaybackShadows:
         )
 
 
-def reset_playback_state(
-    adapter: IsaacLabSuperMimicAdapter,
-    observations: dict[str, torch.Tensor],
-    rollout: WorldModelRollout | None,
-    training_events: dict | None,
-    env_ids: torch.Tensor | None = None,
-) -> None:
-    """Synchronize the indicated model rows with post-reset simulator state."""
-    if rollout is not None:
-        rollout.reset_dynamics(
-            observations["full_state"], adapter.sim_context(training_events), adapter.previous_actions(), env_ids
-        )
-
-
 @torch.no_grad()
-def run_playback(
-    args: argparse.Namespace,
+def run_motion_playback(
     adapter: IsaacLabSuperMimicAdapter,
     actor: MultiEncoderAE,
-    velocity_cfg: VelocityTaskCfg,
+    num_steps: int | None,
     shadows: PlaybackShadows | None,
     rollout: WorldModelRollout | None,
     training_events: dict | None,
 ) -> None:
     """Drive the real robot and synchronize both shadows with the current observations."""
+    env = adapter.env
+    motion_command = adapter.motion_command
+    if num_steps is None:
+        start_frames = motion_command.time_steps
+        num_steps = int(motion_command.motion.clip_end(start_frames)[0] - start_frames[0])
     observations = adapter.observations()
     history = observations["actor"].unsqueeze(1).repeat(1, actor.history_length, 1)
     frames, _ = adapter.motion_goal_window()
-    velocity_commands = None
-    if args.task_encoder == "velocity":
-        velocity_commands = observations["actor"].new_empty((adapter.num_envs, 3))
-        all_env_ids = torch.arange(adapter.num_envs, device=adapter.device)
-        sample_velocity_commands(velocity_commands, velocity_cfg, args.velocity_command, all_env_ids)
-    reset_playback_state(adapter, observations, rollout, training_events)
+    if rollout is not None:
+        rollout.reset_dynamics(
+            observations["full_state"], adapter.sim_context(training_events), adapter.previous_actions()
+        )
 
-    env = adapter.env
     render_shadows = shadows is not None and env.sim.is_rendering
     if shadows is not None:
         shadows.update_reference_shadow()
         if rollout is not None:
             shadows.update_world_model_shadow(rollout)
     if render_shadows:
-        env.cfg.sim.render_interval = (args.num_steps + 1) * env.cfg.decimation
+        env.cfg.sim.render_interval = (num_steps + 1) * env.cfg.decimation
         env.sim.render()
 
-    for step in range(args.num_steps):
-        goal = extract_actor_goal(observations["goal"], frames) if velocity_commands is None else velocity_commands
-        action = actor(build_actor_obs_td({args.task_encoder: goal}, history))
+    for step in range(num_steps):
+        goal = extract_actor_goal(observations["goal"], frames)
+        action = actor(build_actor_obs_td({"motion": goal}, history))
+        if rollout is not None:
+            rollout.reset_dynamics(
+                observations["full_state"], adapter.sim_context(training_events), adapter.previous_actions()
+            )
+            rollout.advance_dynamics(action)
         observations, _, terminated, truncated, _ = adapter.step(action)
         dones = terminated | truncated
         history = advance_proprio_history(history, observations["actor"], dones)
         if rollout is not None:
-            rollout.advance_dynamics(action)
-        if rollout is not None or (velocity_commands is not None and args.velocity_command is None):
             reset_ids = dones.nonzero(as_tuple=True)[0]
             if reset_ids.numel():
-                reset_playback_state(adapter, observations, rollout, training_events, reset_ids)
-                if velocity_commands is not None and args.velocity_command is None:
-                    sample_velocity_commands(velocity_commands, velocity_cfg, None, reset_ids)
+                rollout.reset_dynamics(
+                    observations["full_state"],
+                    adapter.sim_context(training_events),
+                    adapter.previous_actions(),
+                    reset_ids,
+                )
         if shadows is not None:
             shadows.update_reference_shadow()
             if rollout is not None:
@@ -395,69 +430,125 @@ def run_playback(
             print(f"[SuperMimic] playback step={step}")
 
 
-def main() -> None:
+@torch.no_grad()
+def run_velocity_playback(env: ManagerBasedRLEnv, actor: MultiEncoderAE, num_steps: int) -> None:
+    """Drive the actor with the command manager's current body-frame velocity target."""
+    command = env.command_manager.get_term("base_velocity")
+    command.compute(dt=0.0)
+    history = env.obs_buf["actor"].unsqueeze(1).repeat(1, actor.history_length, 1)
+    for step in range(num_steps):
+        action = actor(build_actor_obs_td({"velocity": command.command}, history))
+        observations, _, terminated, truncated, _ = env.step(action)
+        history = advance_proprio_history(history, observations["actor"], terminated | truncated)
+        if step % 100 == 0:
+            print(f"[SuperMimic] playback step={step}")
+
+
+def play_motion(
+    env: ManagerBasedRLEnv,
+    args: argparse.Namespace,
+    path: Path,
+    checkpoint: dict,
+    velocity_cfg: VelocityTaskCfg,
+    snapshot: dict,
+    dynamics_hidden_dims: tuple[int, ...],
+) -> None:
+    """Validate the Motion layout, export the policy, and prepare the selected shadows."""
+    adapter = IsaacLabSuperMimicAdapter(env)
+    adapter.validate_proprio_layout()
+    adapter.validate_full_state_layout(checkpoint["representation"], env.obs_buf["full_state"].shape[-1])
+    if list(adapter.motion_command.cfg.body_names) != checkpoint["body_names"]:
+        raise ValueError("Checkpoint links must match the playback task's tracking order")
+    saved_config = checkpoint["config"]
+    if adapter.motion_goal_window() != (saved_config["num_goal_frames"], saved_config["goal_frame_stride"]):
+        raise ValueError("Checkpoint Motion window must match the playback task")
+    actor = build_actor(env, checkpoint, "motion")
+    if set(checkpoint["task_names"]) == {"motion", "velocity"}:
+        exported = export_actor(actor, env, path.parent / "exported", path.stem, velocity_cfg)
+        print("[SuperMimic] deployment files written to " + ", ".join(str(file) for file in exported))
+
+    rollout = None
+    if args.show_world_model_shadow:
+        with torch.random.fork_rng(devices=[]):
+            world_model = build_world_model_from_state(adapter, checkpoint["representation"], dynamics_hidden_dims)
+        world_model.dynamics.load_state_dict(checkpoint["dynamics"])
+        rollout = WorldModelRollout(world_model.dynamics.eval(), world_model.representation)
+
+    if args.show_reference_shadow or rollout is not None:
+        with TemporaryDirectory(prefix="supermimic-shadows-") as directory:
+            shadows = PlaybackShadows(
+                adapter,
+                Path(directory),
+                show_reference=args.show_reference_shadow,
+                show_world_model=rollout is not None,
+            )
+            run_motion_playback(adapter, actor, args.num_steps, shadows, rollout, snapshot.get("events"))
+    else:
+        run_motion_playback(adapter, actor, args.num_steps, None, None, None)
+
+
+def parse_playback_args() -> tuple[argparse.Namespace, SuperMimicGenCoordEnvCfg, SuperMimicRunnerCfg]:
+    """Parse playback flags and resolve the registered task and agent configs."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_common_args(parser)
-    parser.add_argument("--num-steps", type=int, default=1000)
+    parser.set_defaults(visualizer=["newton_gl"])
+    parser.add_argument(
+        "--num-steps", type=int, help="Playback steps. Defaults to one Motion clip or 1000 Velocity steps."
+    )
     parser.add_argument("--task-encoder", choices=("motion", "velocity"), default="motion")
     parser.add_argument("--velocity-command", nargs=3, type=float, metavar=("VX", "VY", "WZ"))
     parser.add_argument(
         "--show-reference-shadow",
         action=argparse.BooleanOptionalAction,
-        help="Show the reference robot (Motion default).",
+        help="Show the reference robot in Motion playback (enabled by default).",
     )
     parser.add_argument(
         "--show-world-model-shadow",
         action=argparse.BooleanOptionalAction,
-        help="Show the world model (Motion default).",
+        help="Show the world model in Motion playback (enabled by default).",
     )
     args, env_cfg, agent_cfg = parse_task_configs(parser, play=True)
-    if args.num_steps < 0:
+    if args.num_steps is not None and args.num_steps < 0:
         parser.error("--num-steps must be non-negative")
+    if args.task_encoder == "velocity" and (args.show_reference_shadow or args.show_world_model_shadow):
+        parser.error("Shadow display is available in Motion playback")
+    if args.task_encoder == "motion":
+        args.show_reference_shadow = args.show_reference_shadow is not False
+        args.show_world_model_shadow = args.show_world_model_shadow is not False
+    return args, env_cfg, agent_cfg
+
+
+def main() -> None:
+    args, env_cfg, agent_cfg = parse_playback_args()
     path = checkpoint_path(args, args.run_dir / agent_cfg.experiment_name, args.checkpoint or "latest")
     checkpoint = load_checkpoint(path, agent_cfg.representation, args.task_encoder)
-    saved_config = checkpoint["config"]
-    velocity_cfg = VelocityTaskCfg(**(agent_cfg.velocity.to_dict() | (saved_config.get("velocity") or {})))
-    motion_playback = args.task_encoder == "motion"
-    show_reference = motion_playback if args.show_reference_shadow is None else args.show_reference_shadow
-    show_world_model = motion_playback if args.show_world_model_shadow is None else args.show_world_model_shadow
-    if show_world_model and "dynamics" not in checkpoint:
+    velocity_cfg = VelocityTaskCfg(**(agent_cfg.velocity.to_dict() | (checkpoint["config"].get("velocity") or {})))
+    if args.show_world_model_shadow and "dynamics" not in checkpoint:
         raise ValueError(
             "Checkpoint has no dynamics weights. Use --no-show-world-model-shadow for actor-only playback."
         )
     snapshot = {}
-    if args.motion_file is None or show_world_model:
-        snapshot = load_training_snapshot(path.parent / "params" / "env.yaml")
-    load_training_motion_file(env_cfg, args.motion_file, snapshot)
     env_cfg.log_dir = str(path.parent)
     print(f"[SuperMimic] loading {path}")
-    print(f"[SuperMimic] motion library: {env_cfg.commands.motion.motion_file}")
+    if args.task_encoder == "motion":
+        if args.motion_file is None or args.show_world_model_shadow:
+            snapshot = load_training_snapshot(path.parent / "params" / "env.yaml")
+        configure_motion_playback(env_cfg, args.motion_file, snapshot)
+        print(f"[SuperMimic] motion library: {env_cfg.commands.motion.motion_file}")
+    else:
+        configure_velocity_playback(env_cfg, velocity_cfg, args.velocity_command)
 
-    with TemporaryDirectory(prefix="supermimic-shadows-") as directory, launch_simulation(env_cfg, args):
+    with launch_simulation(env_cfg, args):
         env = gym.make(args.task, cfg=env_cfg)
         try:
             env.reset()
-            adapter = IsaacLabSuperMimicAdapter(env)
-            actor = build_actor(adapter, checkpoint, args.task_encoder)
-            if set(checkpoint["task_names"]) == {"motion", "velocity"}:
-                exported = export_actor(actor, env, path.parent / "exported", path.stem, velocity_cfg)
-                print("[SuperMimic] deployment files written to " + ", ".join(str(file) for file in exported))
-            rollout = None
-            if show_world_model:
-                with torch.random.fork_rng(devices=[]):
-                    world_model = build_world_model_from_state(
-                        adapter,
-                        checkpoint["representation"],
-                        tuple(saved_config.get("dynamics_hidden_dims", agent_cfg.dynamics_hidden_dims)),
-                    )
-                world_model.dynamics.load_state_dict(checkpoint["dynamics"])
-                rollout = WorldModelRollout(world_model.dynamics.eval(), world_model.representation)
-            shadows = None
-            if show_reference or show_world_model:
-                shadows = PlaybackShadows(
-                    adapter, Path(directory), show_reference=show_reference, show_world_model=show_world_model
-                )
-            run_playback(args, adapter, actor, velocity_cfg, shadows, rollout, snapshot.get("events"))
+            if args.task_encoder == "motion":
+                hidden_dims = tuple(checkpoint["config"].get("dynamics_hidden_dims", agent_cfg.dynamics_hidden_dims))
+                play_motion(env.unwrapped, args, path, checkpoint, velocity_cfg, snapshot, hidden_dims)
+            else:
+                actor = build_actor(env.unwrapped, checkpoint, "velocity")
+                steps = 1000 if args.num_steps is None else args.num_steps
+                run_velocity_playback(env.unwrapped, actor, steps)
         finally:
             env.close()
 
