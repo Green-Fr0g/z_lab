@@ -56,15 +56,16 @@ def parse_task_configs(parser: argparse.ArgumentParser, *, play: bool = False):
     return args, env_cfg, agent_cfg
 
 
-def checkpoint_path(args: argparse.Namespace, log_root: Path, selection: str) -> Path:
+def checkpoint_path(args: argparse.Namespace, log_root: Path, selection: str, *, world_model: bool = False) -> Path:
     """Find a checkpoint by explicit path or the newest matching run manifest."""
     if selection == "latest":
         selection = resolve_checkpoint_selector(
             str(log_root),
-            selection,
+            "best" if world_model else "latest",
             library="supermimic",
             task=args.task,
-            checkpoint_pattern=r"model_\d+\.pt",
+            checkpoint_pattern=r"(?:model_\d+|world_model)\.pt" if world_model else r"model_\d+\.pt",
+            preferred_checkpoint_pattern=r"world_model\.pt" if world_model else None,
             metadata={"agent": args.agent},
         )
     path = Path(selection).expanduser().resolve()

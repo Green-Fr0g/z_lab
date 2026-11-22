@@ -29,6 +29,7 @@ from supermimic.algorithms.representations import (
 from supermimic.envs.isaaclab_adapter import IsaacLabSuperMimicAdapter
 from supermimic.envs.multi_task_world_model_env import MultiTaskWorldModelEnv
 from supermimic.kinematics import AnalyticIK, ForwardKinematics
+from supermimic.runners.logger import TrainingLogger
 from supermimic.runners.reset_sampling import ReturnSampler, ReturnSamplerCfg
 from supermimic.tasks import VelocityTaskCfg, advance_proprio_history, build_actor_obs_td, velocity_goal_from_motion
 
@@ -160,6 +161,12 @@ class Ratio:
         return updates
 
 
+def _save_checkpoint(path: Path, checkpoint: dict) -> None:
+    temporary_path = path.with_suffix(".tmp")
+    torch.save(checkpoint, temporary_path)
+    temporary_path.replace(path)
+
+
 class BaseRunner[CfgT: BaseRunnerCfg](ABC):
     """Share world-model setup, replay and simulator collection across runners."""
 
@@ -217,7 +224,7 @@ class BaseRunner[CfgT: BaseRunnerCfg](ABC):
         observations: dict[str, torch.Tensor],
         motion_time: torch.Tensor,
         sim_ctx: torch.Tensor,
-    ) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         """Step the simulator and attach its outcome to the pre-step data."""
         fields = {
             "state": observations["full_state"],
@@ -228,12 +235,12 @@ class BaseRunner[CfgT: BaseRunnerCfg](ABC):
         }
         if self._stores_actor_obs:
             fields["actor_obs"] = observations["actor"].clone()
-        next_observations, rewards, terminated, truncated, _ = self.adapter.step(actions)
+        next_observations, rewards, terminated, truncated, extras = self.adapter.step(actions)
         fields["terminated"] = terminated.bool()
         fields["truncated"] = truncated.bool()
         self.replay_buffer.insert(TensorDict(fields, batch_size=[self.adapter.num_envs]))
         self.world_model_learner.update_normalization(fields["state"], actions)
-        return next_observations, rewards, terminated, truncated
+        return next_observations, rewards, terminated, truncated, extras
 
 
 class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
@@ -325,7 +332,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         )
 
     @torch.no_grad()
-    def step(self) -> torch.Tensor:
+    def step(self, logger: TrainingLogger | None = None) -> torch.Tensor:
         """Collect one simulator transition from the multi-encoder policy."""
         observations = self.adapter.observations()
         motion_time = self.adapter.motion_times()
@@ -336,29 +343,37 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         self.actor.eval()
         actions = self.actor(actor_observations)
         actions = actions + torch.randn_like(actions) * self.cfg.action_noise
-        next_observations, rewards, terminated, truncated = self._step_and_store(
+        next_observations, rewards, terminated, truncated, extras = self._step_and_store(
             actions, observations, motion_time, sim_ctx
         )
-        self._advance_sim_history(next_observations["actor"], terminated | truncated)
+        dones = terminated | truncated
+        self._advance_sim_history(next_observations["actor"], dones)
         self.actor.train()
         self.actor.update_normalization(actor_observations)
         self._update_return_sampler(motion_time, rewards, terminated, truncated)
+        if logger is not None:
+            logger.process_env_step(rewards, dones, extras)
         return rewards
 
-    def _train_updates(self, iteration: int) -> dict[str, torch.Tensor]:
+    def _train_updates(self, iteration: int) -> tuple[dict[str, torch.Tensor], float, float]:
         losses: dict[str, torch.Tensor] = {}
         updates = self._updates_per_step(iteration)
         min_sequence = max(self.cfg.world_model.horizon, 2)
         if self.replay_buffer.num_transitions < min_sequence:
-            return losses
+            return losses, 0.0, 0.0
+        world_model_time = policy_time = 0.0
         for _ in range(updates):
+            start = time.perf_counter()
             sequences = [
                 self.replay_buffer.sample(self.cfg.world_model.horizon, self.cfg.world_model.batch_size)
                 for _ in range(self.cfg.world_model.num_batches)
             ]
             losses.update(self.world_model_learner.update(sequences))
+            policy_start = time.perf_counter()
+            world_model_time += policy_start - start
             losses.update(self.policy_learner.update())
-        return losses
+            policy_time += time.perf_counter() - policy_start
+        return losses, world_model_time, policy_time
 
     def _update_return_sampler(
         self,
@@ -384,34 +399,67 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
 
     def run(self, log_dir: Path, infos: dict | None = None) -> Path:
         """Collect transitions, update both learners and save training checkpoints."""
+        from torch.utils.tensorboard import SummaryWriter
+
         log_dir.mkdir(parents=True, exist_ok=True)
-        start_time = time.monotonic()
         losses: dict[str, torch.Tensor] = {}
         start_iteration = self._iteration + 1
         end_iteration = start_iteration + self.cfg.max_iterations
-        for iteration in range(start_iteration, end_iteration):
-            rewards = self.step()
-            losses.update(self._train_updates(iteration))
+        collect_time = world_model_time = policy_time = 0.0
+        with SummaryWriter(log_dir=str(log_dir), flush_secs=10) as writer:
+            logger = TrainingLogger(
+                writer,
+                log_dir.name,
+                (infos or {}).get("task"),
+                self.adapter.num_envs,
+                self.adapter.device,
+                start_iteration,
+                end_iteration,
+            )
+            for iteration in range(start_iteration, end_iteration):
+                start = time.perf_counter()
+                rewards = self.step(logger)
+                collect_time += time.perf_counter() - start
+                metrics, model_update_time, policy_update_time = self._train_updates(iteration)
+                losses.update(metrics)
+                world_model_time += model_update_time
+                policy_time += policy_update_time
 
-            self._iteration = iteration
-            if iteration % self.cfg.log_interval == 0:
-                elapsed = time.monotonic() - start_time
-                reward_mean = rewards.mean().item()
-                metrics = " ".join(f"{name}={value.item():.5g}" for name, value in losses.items())
-                print(
-                    f"[SuperMimic] iteration={iteration} env_reward={reward_mean:.5g} "
-                    f"replay={self.replay_buffer.num_transitions}/{self.cfg.replay_buffer_size} "
-                    f"elapsed={elapsed:.1f}s {metrics}"
-                )
-            if iteration % self.cfg.save_interval == 0 or iteration + 1 == end_iteration:
-                self.save(log_dir / f"model_{iteration}.pt", infos)
+                self._iteration = iteration
+                final_iteration = iteration + 1 == end_iteration
+                if iteration % self.cfg.log_interval == 0 or final_iteration:
+                    logger.log(
+                        iteration=iteration,
+                        collect_time=collect_time,
+                        world_model_time=world_model_time,
+                        policy_time=policy_time,
+                        losses=losses,
+                        env_reward=rewards.mean(),
+                        replay_size=self.replay_buffer.num_transitions,
+                        replay_capacity=self.cfg.replay_buffer_size,
+                        action_noise=self.cfg.action_noise,
+                    )
+                    collect_time = world_model_time = policy_time = 0.0
+                if iteration % self.cfg.save_interval == 0 or final_iteration:
+                    self.save(log_dir / f"model_{iteration}.pt", infos)
+                    _save_checkpoint(log_dir / "world_model.pt", self._world_model_checkpoint())
         return log_dir
+
+    def _world_model_checkpoint(self) -> dict:
+        return {
+            "format_version": 1,
+            "iter": self._iteration,
+            "config": {"dynamics_hidden_dims": self.cfg.dynamics_hidden_dims},
+            "dynamics": self.dynamics.state_dict(),
+            "representation": self.cfg.representation,
+            "joint_names": list(self.adapter.action_term._joint_names),
+            "body_names": list(self.adapter.motion_command.cfg.body_names),
+        }
 
     def save(self, path: Path, infos: dict | None = None) -> None:
         """Write actor, world model, optimizers and configuration to a checkpoint."""
         checkpoint = {
-            "format_version": 1,
-            "iter": self._iteration,
+            **self._world_model_checkpoint(),
             "infos": infos,
             "config": {
                 **asdict(self.cfg),
@@ -419,33 +467,42 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                 "goal_frame_stride": self.goal_frame_stride,
             },
             "actor": self.actor.state_dict(),
-            "dynamics": self.dynamics.state_dict(),
             "actor_optimizers": [optimizer.state_dict() for optimizer in self.policy_learner.actor_optimizers],
             "world_model_optimizers": [optimizer.state_dict() for optimizer in self.world_model_learner.optimizers],
-            "representation": self.cfg.representation,
             "actor_obs_mode": "proprio",
             "task_names": list(self.actor.task_names),
             "slot_mix": dict(self.cfg.slot_mix),
-            "joint_names": list(self.adapter.action_term._joint_names),
-            "body_names": list(self.adapter.motion_command.cfg.body_names),
         }
         if isinstance(self.policy_learner, ActorCriticPolicyLearner):
             checkpoint["critic"] = self.policy_learner.critic.state_dict()
             checkpoint["critic_optimizers"] = [
                 optimizer.state_dict() for optimizer in self.policy_learner.critic_optimizers
             ]
-        temporary_path = path.with_suffix(".tmp")
-        torch.save(checkpoint, temporary_path)
-        temporary_path.replace(path)
+        _save_checkpoint(path, checkpoint)
 
-    def load(self, checkpoint: dict) -> None:
-        """Restore weights and optimizer states before collecting a new replay buffer."""
+    def _validate_checkpoint_layout(self, checkpoint: dict) -> None:
         if checkpoint["representation"] != self.cfg.representation:
             raise ValueError("Checkpoint representation must match the training agent")
         if checkpoint["joint_names"] != list(self.adapter.action_term._joint_names):
             raise ValueError("Checkpoint joints must match the training task's action order")
         if checkpoint["body_names"] != list(self.adapter.motion_command.cfg.body_names):
             raise ValueError("Checkpoint links must match the training task's tracking order")
+
+    def load_world_model(self, checkpoint: dict) -> None:
+        """Initialize dynamics and its normalizers from a standalone or full checkpoint."""
+        self._validate_checkpoint_layout(checkpoint)
+        if tuple(checkpoint["config"]["dynamics_hidden_dims"]) != self.cfg.dynamics_hidden_dims:
+            raise ValueError("Checkpoint dynamics hidden dimensions must match the training agent")
+        state = checkpoint["dynamics"]
+        target_state = self.dynamics.state_dict()
+        for name in ("action_scale", "action_offset", "representation.default_joint_pos"):
+            if not torch.equal(state[name].to(target_state[name]), target_state[name]):
+                raise ValueError(f"Checkpoint dynamics {name} must match the training task")
+        self.dynamics.load_state_dict(state)
+
+    def load(self, checkpoint: dict) -> None:
+        """Restore weights and optimizer states before collecting a new replay buffer."""
+        self._validate_checkpoint_layout(checkpoint)
         saved_cfg = checkpoint["config"]
         if (saved_cfg["num_goal_frames"], saved_cfg["goal_frame_stride"]) != (
             self.num_goal_frames,

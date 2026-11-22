@@ -114,6 +114,14 @@ uv run isaaclab zero_agent --task ZLab-SuperMimic-GenCoord-G1 --num_envs 4 --max
 uv run isaaclab random_agent --task ZLab-SuperMimic-MaxCoord-G1 --num_envs 4 --max_steps 20 --viz none
 ```
 
+训练会在运行目录里保存用于续训的 `model_<iteration>.pt`，并在每次保存时更新 `world_model.pt`。可用独立文件热启动世界模型。
+
+```bash
+uv run python scripts/supermimic/train.py --task ZLab-SuperMimic-GenCoord-G1 --world-model-checkpoint ./world_model.pt
+```
+
+`--world-model-checkpoint` 也接受完整 checkpoint 路径和 `latest`。`latest` 优先使用最新可用运行中的 `world_model.pt`，旧运行可以使用完整 checkpoint。新训练沿用动力学权重和归一化统计，策略、优化器和回放缓冲区重新初始化，从第 0 次迭代开始。该参数与用于完整续训的 `--checkpoint` 互斥。
+
 使用本地 SuperMimic checkpoint 播放策略：
 
 ```bash

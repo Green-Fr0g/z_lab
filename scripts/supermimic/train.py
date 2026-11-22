@@ -56,7 +56,13 @@ def main() -> None:
     parser.add_argument("--run_name", "--run-name")
     parser.add_argument("--replay-ratio", type=float)
     parser.add_argument("--motion_rate", type=float, help="Fraction of training slots assigned to Motion.")
+    parser.add_argument(
+        "--world-model-checkpoint",
+        help="Initialize only the world model from world_model.pt, a full checkpoint, or 'latest'.",
+    )
     args, env_cfg, agent_cfg = parse_task_configs(parser)
+    if args.checkpoint and args.world_model_checkpoint:
+        parser.error("--checkpoint and --world-model-checkpoint are mutually exclusive")
     if args.max_iterations is not None:
         agent_cfg.max_iterations = args.max_iterations
     if args.run_name is not None:
@@ -79,6 +85,9 @@ def main() -> None:
     env_cfg.commands.motion.sampling_mode = "external" if cfg.sampling_mode == "return" else cfg.sampling_mode
     log_root = args.run_dir / agent_cfg.experiment_name
     resume_path = checkpoint_path(args, log_root, args.checkpoint) if args.checkpoint else None
+    world_model_path = None
+    if args.world_model_checkpoint:
+        world_model_path = checkpoint_path(args, log_root, args.world_model_checkpoint, world_model=True)
     run_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if agent_cfg.run_name:
         run_name += f"_{agent_cfg.run_name}"
@@ -90,15 +99,22 @@ def main() -> None:
         env = gym.make(args.task, cfg=env_cfg)
         try:
             runner = SuperMimicRunner(env, cfg)
+            metadata = {"agent": args.agent}
             if resume_path is not None:
                 checkpoint = torch.load(resume_path, map_location=runner.adapter.device, weights_only=False)
                 runner.load(checkpoint)
                 print(f"[SuperMimic] resumed from {resume_path}")
+            elif world_model_path is not None:
+                checkpoint = torch.load(world_model_path, map_location="cpu", weights_only=True)
+                runner.load_world_model(checkpoint)
+                del checkpoint
+                metadata["world_model_checkpoint"] = str(world_model_path)
+                print(f"[SuperMimic] initialized world model from {world_model_path}")
             env_cfg = env.unwrapped.cfg
             agent_cfg.seed = env_cfg.seed
-            infos = {"task": args.task, "agent": args.agent}
+            infos = {"task": args.task, **metadata}
             dump_train_configs(str(log_dir), env_cfg, agent_cfg)
-            write_run_manifest(str(log_dir), library="supermimic", task=args.task, metadata={"agent": args.agent})
+            write_run_manifest(str(log_dir), library="supermimic", task=args.task, metadata=metadata)
             runner.run(log_dir, infos)
             print(f"[SuperMimic] checkpoints written to {log_dir}")
         finally:
