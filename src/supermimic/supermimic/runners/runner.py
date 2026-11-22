@@ -407,18 +407,23 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         end_iteration = start_iteration + self.cfg.max_iterations
         collect_time = world_model_time = policy_time = 0.0
         with SummaryWriter(log_dir=str(log_dir), flush_secs=10) as writer:
+            total_log_iterations = max(
+                (self.cfg.max_iterations + self.cfg.log_interval - 1) // self.cfg.log_interval, 1
+            )
             logger = TrainingLogger(
                 writer,
                 log_dir.name,
                 (infos or {}).get("task"),
                 self.adapter.num_envs,
+                self.env.max_episode_length,
                 self.adapter.device,
-                start_iteration,
-                end_iteration,
             )
+            num_collected_steps = 0
+            log_count = 0
             for iteration in range(start_iteration, end_iteration):
                 start = time.perf_counter()
-                rewards = self.step(logger)
+                self.step(logger)
+                num_collected_steps += self.adapter.num_envs
                 collect_time += time.perf_counter() - start
                 metrics, model_update_time, policy_update_time = self._train_updates(iteration)
                 losses.update(metrics)
@@ -429,17 +434,17 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                 final_iteration = iteration + 1 == end_iteration
                 if iteration % self.cfg.log_interval == 0 or final_iteration:
                     logger.log(
-                        iteration=iteration,
+                        iteration=log_count,
+                        total_iterations=total_log_iterations,
                         collect_time=collect_time,
                         world_model_time=world_model_time,
                         policy_time=policy_time,
                         losses=losses,
-                        env_reward=rewards.mean(),
-                        replay_size=self.replay_buffer.num_transitions,
-                        replay_capacity=self.cfg.replay_buffer_size,
-                        action_noise=self.cfg.action_noise,
+                        num_collected_steps=num_collected_steps,
                     )
+                    log_count += 1
                     collect_time = world_model_time = policy_time = 0.0
+                    num_collected_steps = 0
                 if iteration % self.cfg.save_interval == 0 or final_iteration:
                     self.save(log_dir / f"model_{iteration}.pt", infos)
                     _save_checkpoint(log_dir / "world_model.pt", self._world_model_checkpoint())
