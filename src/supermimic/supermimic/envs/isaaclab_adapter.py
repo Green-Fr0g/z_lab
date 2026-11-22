@@ -114,12 +114,15 @@ class IsaacLabSuperMimicAdapter:
         """Return the raw actions that produced the current observation."""
         return self.env.action_manager.action.clone()
 
-    def sim_context(self) -> torch.Tensor:
-        """Read and normalize realized friction, CoM and encoder-bias values."""
+    def sim_context(self, training_events: dict | None = None) -> torch.Tensor:
+        """Normalize realized physics parameters, optionally in the training ranges."""
         events = self.env.cfg.events
-        friction_range = events.foot_friction.params["friction_range"]
-        com_ranges = events.base_com.params["com_range"]
-        bias_range = events.encoder_bias.params["bias_range"]
+        training_events = training_events or {}
+        friction_range = training_events.get("foot_friction", {}).get("params", events.foot_friction.params)[
+            "friction_range"
+        ]
+        com_ranges = training_events.get("base_com", {}).get("params", events.base_com.params)["com_range"]
+        bias_range = training_events.get("encoder_bias", {}).get("params", events.encoder_bias.params)["bias_range"]
         friction = self.env.supermimic_foot_friction[:, :1]
         com_offset = self.env.supermimic_com_offset
         encoder_bias = self.env.supermimic_encoder_bias[:, self.joint_ids]

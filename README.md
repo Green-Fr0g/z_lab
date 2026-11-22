@@ -114,6 +114,17 @@ uv run isaaclab zero_agent --task ZLab-SuperMimic-GenCoord-G1 --num_envs 4 --max
 uv run isaaclab random_agent --task ZLab-SuperMimic-MaxCoord-G1 --num_envs 4 --max_steps 20 --viz none
 ```
 
+使用本地 SuperMimic checkpoint 播放策略：
+
+```bash
+uv run --extra viser python scripts/supermimic/play.py --task ZLab-SuperMimic-GenCoord-G1 --checkpoint ./model.pt --viz viser
+```
+
+`--task-encoder motion` 默认显示蓝色参考动作影子和橙色世界模型影子，二者随真实环境的 episode 重置同步更新。
+`--task-encoder velocity` 默认关闭两个影子，并在每个环境重置时独立采样一条机身坐标系速度指令，在该 episode 内保持固定。
+用 `--velocity-command VX VY WZ` 指定固定指令，例如 `--velocity-command 0 0 0`。
+可通过 `--show-reference-shadow`、`--show-world-model-shadow` 和对应的 `--no-show-*` 参数覆盖显示默认值。
+
 ## 项目结构
 
 任务代码位于 `src/z_lab/tasks`。locomotion 任务的公共环境配置在 `locomotion_env_cfg.py` 中，公共 MDP 项位于 `mdp` 目录。三个机器人分别拥有独立的环境注册、机器人场景和 RSL-RL 配置：

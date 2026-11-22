@@ -13,7 +13,43 @@ from supermimic.algorithms.replay_buffer import ReplayBuffer
 from supermimic.algorithms.representations import StateRepresentation
 
 
-class WorldModelEnv(ABC):
+class WorldModelRollout:
+    """Own the learned transition state shared by training and playback."""
+
+    def __init__(self, dynamics: Dynamics, representation: StateRepresentation) -> None:
+        self.dynamics = dynamics
+        self.representation = representation
+
+    def reset_dynamics(
+        self,
+        full_state: torch.Tensor,
+        sim_ctx: torch.Tensor,
+        last_action: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Initialize from simulation, optionally replacing only the specified rows."""
+        if env_ids is None:
+            self.aux_state = self.representation.extract_aux_state(full_state).detach().clone()
+            self.rep_state = self.representation.represent(full_state).detach().clone()
+            self.sim_ctx = sim_ctx.detach().clone()
+            self.last_action = last_action.detach().clone()
+        else:
+            state = full_state[env_ids]
+            self.aux_state[env_ids] = self.representation.extract_aux_state(state).detach()
+            self.rep_state[env_ids] = self.representation.represent(state).detach()
+            self.sim_ctx[env_ids] = sim_ctx[env_ids].detach()
+            self.last_action[env_ids] = last_action[env_ids].detach()
+
+    def _predict_state(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.dynamics(self.rep_state, action, self.aux_state, self.sim_ctx)
+
+    def advance_dynamics(self, action: torch.Tensor) -> None:
+        """Advance the learned state by one simulator control step."""
+        self.aux_state, self.rep_state = self._predict_state(action)
+        self.last_action = action.detach().clone()
+
+
+class WorldModelEnv(WorldModelRollout, ABC):
     """Advance a learned robot state against a shared reference motion."""
 
     def __init__(
@@ -38,8 +74,7 @@ class WorldModelEnv(ABC):
             raise ValueError("termination_softness must be positive")
         if not 1 <= history_length <= replay_buffer.buffer_size:
             raise ValueError("history_length must be in [1, buffer_size]")
-        self.dynamics = dynamics
-        self.representation = representation
+        super().__init__(dynamics, representation)
         representation.bind(soft_joint_pos_limits=soft_joint_pos_limits)
         self.motion = motion_command.motion
         self.motion_joint_indices = motion_command.joint_indexes
@@ -111,7 +146,7 @@ class WorldModelEnv(ABC):
         self, action: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Score the predicted state against the reference before advancing its frame."""
-        next_aux, next_rep = self.dynamics(self.rep_state, action, self.aux_state, self.sim_ctx)
+        next_aux, next_rep = self._predict_state(action)
         next_joint_state = self.representation.joint_state(next_rep)
         reward = self.representation.compute_wm_reward_from_reference(
             next_rep,

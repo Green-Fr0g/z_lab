@@ -78,15 +78,22 @@ class WorldModel:
 
 def build_world_model(cfg: BaseRunnerCfg, adapter: IsaacLabSuperMimicAdapter) -> WorldModel:
     """Reset the task and build its representation and dynamics."""
+    adapter.env.reset()
+    return build_world_model_from_state(adapter, cfg.representation, cfg.dynamics_hidden_dims)
+
+
+def build_world_model_from_state(
+    adapter: IsaacLabSuperMimicAdapter, representation_name: str, hidden_dims: tuple[int, ...]
+) -> WorldModel:
+    """Build the world model from an initialized task without resetting it."""
     env = adapter.env
-    env.reset()
     observations = adapter.observations()
-    adapter.validate_full_state_layout(cfg.representation, observations["full_state"].shape[-1])
+    adapter.validate_full_state_layout(representation_name, observations["full_state"].shape[-1])
     num_joints = adapter.num_actions
     default_joint_pos = adapter.default_joint_pos()
     joint_limits = adapter.soft_joint_pos_limits()
     robot_model = adapter.load_robot_model()
-    if cfg.representation == "gencoord":
+    if representation_name == "gencoord":
         representation: StateRepresentation = GenCoordRepresentation(
             num_joints, default_joint_pos, env.step_dt, env.cfg.decimation
         )
@@ -105,9 +112,9 @@ def build_world_model(cfg: BaseRunnerCfg, adapter: IsaacLabSuperMimicAdapter) ->
     if observations["actor"].shape[-1] != proprio_dim or proprio_dim != representation.proprio_obs_dim(num_joints):
         raise ValueError("Task actor observation width does not match model proprioception")
     action_scale, action_offset = adapter.action_scale_offset()
-    dynamics = Dynamics(
-        representation, num_joints, sim_context_dim, action_scale, action_offset, cfg.dynamics_hidden_dims
-    ).to(adapter.device)
+    dynamics = Dynamics(representation, num_joints, sim_context_dim, action_scale, action_offset, hidden_dims).to(
+        adapter.device
+    )
     return WorldModel(representation, dynamics, observations["goal"].shape[-1], proprio_dim, sim_context_dim)
 
 
