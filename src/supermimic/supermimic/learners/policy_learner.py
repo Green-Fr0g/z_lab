@@ -8,9 +8,9 @@ import torch
 from tensordict import TensorDict
 from torch import nn
 
-from supermimic.algorithms.learners.cuda_graph import CapturedUpdate, graph_state
-from supermimic.algorithms.learners.optimizer import build_optimizers, optimize_step
 from supermimic.envs.world_model_env import WorldModelEnv
+from supermimic.learners.cuda_graph import CapturedUpdate, graph_state
+from supermimic.learners.optimizer import build_optimizers, optimize_step
 
 
 @dataclass

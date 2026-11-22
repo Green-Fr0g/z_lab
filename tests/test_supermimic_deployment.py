@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import onnx
 import torch
 from onnx.reference import ReferenceEvaluator
-from supermimic.algorithms.models import MultiEncoderAE, TaskSpec
+from supermimic.models import MultiEncoderAE, TaskSpec
 from supermimic.runners.exporter import export_actor
 from supermimic.tasks import VelocityTaskCfg, build_actor_obs_td, velocity_goal_from_motion
 

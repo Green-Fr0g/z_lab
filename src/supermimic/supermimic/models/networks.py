@@ -9,7 +9,7 @@ from rsl_rl.modules import EmpiricalNormalization
 from tensordict import TensorDict
 from torch import nn
 
-from supermimic.algorithms.representations import StateRepresentation
+from supermimic.representations import StateRepresentation
 
 
 class _StableEmpiricalNormalization(EmpiricalNormalization):

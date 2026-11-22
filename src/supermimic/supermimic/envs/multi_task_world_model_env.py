@@ -8,10 +8,10 @@ from typing import Any
 import torch
 from tensordict import TensorDict
 
-from supermimic.algorithms.models import Dynamics, TaskSpec
-from supermimic.algorithms.replay_buffer import ReplayBuffer
-from supermimic.algorithms.representations import StateRepresentation
 from supermimic.envs.world_model_env import WorldModelEnv
+from supermimic.models import Dynamics, TaskSpec
+from supermimic.representations import StateRepresentation
+from supermimic.storage import ReplayBuffer
 from supermimic.tasks import VelocityTaskCfg, build_actor_obs_td, velocity_goal_from_motion
 
 

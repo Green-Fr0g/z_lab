@@ -12,7 +12,7 @@ import onnx
 import torch
 from torch import nn
 
-from supermimic.algorithms.models import MultiEncoderAE
+from supermimic.models import MultiEncoderAE
 from supermimic.tasks import VelocityTaskCfg
 
 

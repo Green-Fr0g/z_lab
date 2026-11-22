@@ -8,9 +8,9 @@ from typing import Any
 import torch
 from tensordict import TensorDict
 
-from supermimic.algorithms.models import Dynamics
-from supermimic.algorithms.replay_buffer import ReplayBuffer
-from supermimic.algorithms.representations import StateRepresentation
+from supermimic.models import Dynamics
+from supermimic.representations import StateRepresentation
+from supermimic.storage import ReplayBuffer
 
 
 class WorldModelRollout:

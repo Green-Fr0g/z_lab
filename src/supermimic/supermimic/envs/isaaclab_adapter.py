@@ -6,8 +6,8 @@ from typing import Any
 
 import torch
 
-from supermimic.algorithms.representations import PROPRIO_OBS_TERMS
 from supermimic.kinematics import RobotModel, load_robot_model
+from supermimic.representations import PROPRIO_OBS_TERMS
 
 _TRACKING_REWARD_NAMES = (
     "motion_global_anchor_pos",

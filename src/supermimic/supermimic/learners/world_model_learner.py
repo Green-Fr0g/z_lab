@@ -8,10 +8,10 @@ from dataclasses import dataclass
 import torch
 from tensordict import TensorDict
 
-from supermimic.algorithms.learners.cuda_graph import CapturedUpdate, graph_state
-from supermimic.algorithms.learners.optimizer import build_optimizers, optimize_step
-from supermimic.algorithms.models import Dynamics
-from supermimic.algorithms.representations import StateRepresentation
+from supermimic.learners.cuda_graph import CapturedUpdate, graph_state
+from supermimic.learners.optimizer import build_optimizers, optimize_step
+from supermimic.models import Dynamics
+from supermimic.representations import StateRepresentation
 
 
 @dataclass

@@ -8,8 +8,8 @@ from datetime import datetime
 import gymnasium as gym
 import torch
 from cli_args import add_common_args, checkpoint_path, parse_task_configs
-from supermimic.algorithms.learners.policy_learner import ActorCriticPolicyLearnerCfg, BpttPolicyLearnerCfg
-from supermimic.algorithms.learners.world_model_learner import WorldModelLearnerCfg
+from supermimic.learners.policy_learner import ActorCriticPolicyLearnerCfg, BpttPolicyLearnerCfg
+from supermimic.learners.world_model_learner import WorldModelLearnerCfg
 from supermimic.runners.reset_sampling import ReturnSamplerCfg
 from supermimic.runners.runner import SuperMimicRunner, SuperMimicRunnerCfg
 from supermimic.tasks import VelocityTaskCfg

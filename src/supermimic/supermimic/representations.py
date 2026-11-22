@@ -1,4 +1,4 @@
-"""GenCoord and MaxCoord state representations for SuperMimic."""
+"""Generalized and maximal coordinate state representations for SuperMimic."""
 
 from __future__ import annotations
 

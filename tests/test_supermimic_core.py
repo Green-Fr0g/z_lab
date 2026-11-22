@@ -7,13 +7,13 @@ import numpy as np
 import pytest
 import torch
 from pxr import Usd
-from supermimic.algorithms.learners.policy_learner import ActorCriticPolicyLearner, ActorCriticPolicyLearnerCfg
-from supermimic.algorithms.learners.world_model_learner import WorldModelLearner, WorldModelLearnerCfg
-from supermimic.algorithms.models import Dynamics, MultiEncoderAE, TaskSpec, build_mlp
-from supermimic.algorithms.replay_buffer import FieldSpec, ReplayBuffer
-from supermimic.algorithms.representations import GenCoordRepresentation, MaxCoordRepresentation, StateRepresentation
 from supermimic.envs.multi_task_world_model_env import MultiTaskWorldModelEnv
 from supermimic.kinematics import ForwardKinematics, load_robot_model
+from supermimic.learners.policy_learner import ActorCriticPolicyLearner, ActorCriticPolicyLearnerCfg
+from supermimic.learners.world_model_learner import WorldModelLearner, WorldModelLearnerCfg
+from supermimic.models import Dynamics, MultiEncoderAE, TaskSpec, build_mlp
+from supermimic.representations import GenCoordRepresentation, MaxCoordRepresentation, StateRepresentation
+from supermimic.storage import FieldSpec, ReplayBuffer
 from tensordict import TensorDict
 
 from z_lab.assets.robots.g1 import G1_DOF_ORDER, G1_MIMIC_LINK_NAMES, G1_USD_PATH

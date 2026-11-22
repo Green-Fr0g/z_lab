@@ -1,4 +1,4 @@
-"""Per-environment circular storage and episode-aware transition sampling."""
+"""Per-environment replay storage and episode-aware transition sampling."""
 
 from __future__ import annotations
 

@@ -16,13 +16,13 @@ from cli_args import add_common_args, checkpoint_path, parse_task_configs
 from isaaclab_visualizers.newton.newton_visualization_markers import NewtonVisualizationMarkers
 from newton.viewer import ViewerBase, ViewerViser
 from pxr import Usd, UsdGeom, UsdPhysics
-from supermimic.algorithms.models import MultiEncoderAE, TaskSpec
-from supermimic.algorithms.representations import PROPRIO_OBS_TERMS, extract_actor_goal
 from supermimic.envs.isaaclab_adapter import IsaacLabSuperMimicAdapter
+from supermimic.envs.isaaclab_world_model import build_world_model_from_state
 from supermimic.envs.world_model_env import WorldModelRollout
 from supermimic.kinematics import ForwardKinematics, load_robot_model
+from supermimic.models import MultiEncoderAE, TaskSpec
+from supermimic.representations import PROPRIO_OBS_TERMS, extract_actor_goal
 from supermimic.runners.exporter import export_actor
-from supermimic.runners.runner import build_world_model_from_state
 from supermimic.tasks import VelocityTaskCfg, advance_proprio_history, build_actor_obs_td
 from supermimic.utils.math import matrix_to_quat, quat_apply, quat_apply_inverse, quat_inv, quat_mul
 
