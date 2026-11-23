@@ -431,17 +431,19 @@ def run_motion_playback(
 
 
 @torch.no_grad()
-def run_velocity_playback(env: ManagerBasedRLEnv, actor: MultiEncoderAE, num_steps: int) -> None:
+def run_velocity_playback(env: ManagerBasedRLEnv, actor: MultiEncoderAE, num_steps: int | None) -> None:
     """Drive the actor with the command manager's current body-frame velocity target."""
     command = env.command_manager.get_term("base_velocity")
     command.compute(dt=0.0)
     history = env.obs_buf["actor"].unsqueeze(1).repeat(1, actor.history_length, 1)
-    for step in range(num_steps):
+    step = 0
+    while (num_steps is None or step < num_steps) and env.sim.is_running():
         action = actor(build_actor_obs_td({"velocity": command.command}, history))
         observations, _, terminated, truncated, _ = env.step(action)
         history = advance_proprio_history(history, observations["actor"], terminated | truncated)
         if step % 100 == 0:
             print(f"[SuperMimic] playback step={step}")
+        step += 1
 
 
 def play_motion(
@@ -493,7 +495,7 @@ def parse_playback_args() -> tuple[argparse.Namespace, SuperMimicGenCoordEnvCfg,
     add_common_args(parser)
     parser.set_defaults(visualizer=["newton_gl"])
     parser.add_argument(
-        "--num-steps", type=int, help="Playback steps. Defaults to one Motion clip or 1000 Velocity steps."
+        "--num-steps", type=int, help="Playback step limit. Defaults to one Motion clip or unlimited Velocity playback."
     )
     parser.add_argument("--task-encoder", choices=("motion", "velocity"), default="motion")
     parser.add_argument("--velocity-command", nargs=3, type=float, metavar=("VX", "VY", "WZ"))
@@ -547,8 +549,7 @@ def main() -> None:
                 play_motion(env.unwrapped, args, path, checkpoint, velocity_cfg, snapshot, hidden_dims)
             else:
                 actor = build_actor(env.unwrapped, checkpoint, "velocity")
-                steps = 1000 if args.num_steps is None else args.num_steps
-                run_velocity_playback(env.unwrapped, actor, steps)
+                run_velocity_playback(env.unwrapped, actor, args.num_steps)
         finally:
             env.close()
 
