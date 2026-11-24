@@ -25,6 +25,10 @@
 
 已有项目环境时，可用 `./z_lab.sh --install-rsl-rl` 单独重装本地 RSL-RL。
 
+### 资产转换依赖（Kitless）
+
+项目的 `importers` extra 对应 `isaaclab[importers]==3.0.0`，提供 URDF 和 MuJoCo MJCF 的独立导入器。运行转换示例时，`uv run --extra importers` 会按需安装该依赖。转换可以在未安装 Isaac Sim 或未启动 Kit 的环境中运行。[转换教程](#在-kitless-环境中将-urdf-或-mjcf-转换为-usd)
+
 ### 选择物理后端
 
 默认后端是 Newton/MJWarp，可直接运行无界面仿真。也可以根据任务的预设选择 Isaac Sim PhysX 或 OvPhysX，并通过相应的 extra 安装运行时。
@@ -123,6 +127,26 @@ robot_usd_path = Z_LAB_ASSETS_DIR / "models" / "g1" / "g1_29dof_rev_1_0.usd"
 ```
 
 需要传入字符串的配置字段应使用 `str(robot_usd_path)`。项目的 `.gitattributes` 已为 USD 等大文件配置 Git LFS；添加大型二进制资产前请先安装 Git LFS。
+
+### 在 Kitless 环境中将 URDF 或 MJCF 转换为 USD
+
+在项目根目录运行脚本。`--out_dir` 指定输出目录，`--urdf_dir` 和 `--xml_dir` 可以单独使用，也可以一起传入。输入路径可以是单个文件或目录，目录会递归查找模型。扫描 XML 目录时，脚本会跳过 ROS 的 `package.ros1.xml`、`package.ros2.xml` 等根元素并非 `<mujoco>` 的文件。
+
+```bash
+zoo=/home/zhang/code/deploy/rl_sar/src/rl_sar_zoo
+
+# 批量转换 G1 的 MuJoCo MJCF 文件
+uv run --extra importers python scripts/convert_to_usd.py \
+  --xml_dir "$zoo/g1_description/mjcf" --out_dir outputs/usd
+
+# 转换引用 package:// 网格的 Go2 URDF
+uv run --extra importers python scripts/convert_to_usd.py \
+  --urdf_dir "$zoo/go2_description/urdf/go2_description.urdf" --out_dir outputs/usd
+```
+
+保持模型目录结构。Isaac Lab 导入器会沿 URDF 的上级目录查找 `package://` 引用的网格，因此 `rl_sar_zoo` 的 Go2 可以直接转换。MJCF 的网格、纹理和 `<include>` 文件按原相对路径读取，物理场景设置由 Isaac Lab 任务提供。
+
+脚本会打印生成的 `.usda` 入口路径，重复转换时输出目录可能带编号。接入任务时，将生成的资产子目录连同 `payloads/` 等引用文件一起移入 `src/z_lab/assets/data/models/`，再把入口路径填入对应机器人配置的 `UsdFileCfg.usd_path`。[Isaac Lab 资产导入文档](https://isaac-sim.github.io/IsaacLab/main/source/how-to/import_new_asset.html)
 
 ## 致谢
 
