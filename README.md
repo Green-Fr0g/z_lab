@@ -25,7 +25,7 @@
 
 1. 初始化 Git LFS 并执行 `git lfs pull`，拉取 USD、模型和其他大文件。
 2. 使用 Python 3.12 创建项目的 `.venv` 虚拟环境。
-3. 执行 `uv sync --extra rsl-rl`，安装项目和 Isaac Lab 依赖。
+3. 执行 `uv sync --extra rsl-rl --extra supermimic --extra viser`，安装项目、Isaac Lab 依赖、可编辑的本地 SuperMimic 和 Viser。
 4. 将 `src/rsl_rl` 中的 RSL-RL 5.5.1 + AMP 以 editable 方式安装，并检查 AMP 算法入口。
 
 已有项目环境时，可以单独安装本地 RSL-RL：
@@ -117,7 +117,7 @@ uv run isaaclab random_agent --task ZLab-SuperMimic-MaxCoord-G1 --num_envs 4 --m
 训练会在运行目录里保存用于续训的 `model_<iteration>.pt`，并在每次保存时更新 `world_model.pt`。可用独立文件热启动世界模型。
 
 ```bash
-uv run python scripts/supermimic/train.py --task ZLab-SuperMimic-GenCoord-G1 --world-model-checkpoint ./world_model.pt
+uv run --extra supermimic python scripts/supermimic/train.py --task ZLab-SuperMimic-GenCoord-G1 --world-model-checkpoint ./world_model.pt
 ```
 
 `--world-model-checkpoint` 也接受完整 checkpoint 路径和 `latest`。`latest` 优先使用最新可用运行中的 `world_model.pt`，旧运行可以使用完整 checkpoint。新训练沿用动力学权重和归一化统计，策略、优化器和回放缓冲区重新初始化，从第 0 次迭代开始。该参数与用于完整续训的 `--checkpoint` 互斥。
@@ -125,7 +125,7 @@ uv run python scripts/supermimic/train.py --task ZLab-SuperMimic-GenCoord-G1 --w
 使用本地 SuperMimic checkpoint 播放策略：
 
 ```bash
-uv run --extra viser python scripts/supermimic/play.py --task ZLab-SuperMimic-GenCoord-G1 --checkpoint ./model.pt --viz viser
+uv run --extra supermimic --extra viser python scripts/supermimic/play.py --task ZLab-SuperMimic-GenCoord-G1 --checkpoint ./model.pt --viz viser
 ```
 
 `--task-encoder motion` 默认播放所选片段到末帧，并显示蓝色参考动作影子和橙色世界模型影子。可用 `--num-steps` 指定播放步数。
