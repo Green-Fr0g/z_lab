@@ -96,6 +96,9 @@ def main() -> None:
     env_cfg.log_dir = str(log_dir)
 
     with launch_simulation(env_cfg, args):
+        if torch.device(env_cfg.sim.device).type == "cuda":
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+            torch.backends.cudnn.fp32_precision = "tf32"
         env = gym.make(args.task, cfg=env_cfg)
         try:
             runner = SuperMimicRunner(env, cfg)

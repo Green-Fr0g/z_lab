@@ -303,6 +303,11 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
             logger.process_env_step(rewards, dones, extras)
         return rewards
 
+    def _synchronize_cuda(self) -> None:
+        """Wait for GPU work before reading a phase's wall-clock time."""
+        if self.adapter.device.type == "cuda":
+            torch.cuda.synchronize(self.adapter.device)
+
     def _train_updates(self, iteration: int) -> tuple[dict[str, torch.Tensor], float, float]:
         losses: dict[str, torch.Tensor] = {}
         updates = self._updates_per_step(iteration)
@@ -317,9 +322,11 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                 for _ in range(self.cfg.world_model.num_batches)
             ]
             losses.update(self.world_model_learner.update(sequences))
+            self._synchronize_cuda()
             policy_start = time.perf_counter()
             world_model_time += policy_start - start
             losses.update(self.policy_learner.update())
+            self._synchronize_cuda()
             policy_time += time.perf_counter() - policy_start
         return losses, world_model_time, policy_time
 
@@ -368,9 +375,11 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
             )
             num_collected_steps = 0
             log_count = 0
+            self._synchronize_cuda()
             for iteration in range(start_iteration, end_iteration):
                 start = time.perf_counter()
                 self.step(logger)
+                self._synchronize_cuda()
                 num_collected_steps += self.adapter.num_envs
                 collect_time += time.perf_counter() - start
                 metrics, model_update_time, policy_update_time = self._train_updates(iteration)

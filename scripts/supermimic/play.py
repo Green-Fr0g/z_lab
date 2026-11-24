@@ -400,7 +400,7 @@ def run_motion_playback(
         env.cfg.sim.render_interval = (num_steps + 1) * env.cfg.decimation
         env.sim.render()
 
-    for step in range(num_steps):
+    for _ in range(num_steps):
         goal = extract_actor_goal(observations["goal"], frames)
         action = actor(build_actor_obs_td({"motion": goal}, history))
         if rollout is not None:
@@ -426,8 +426,6 @@ def run_motion_playback(
                 shadows.update_world_model_shadow(rollout)
         if render_shadows:
             env.sim.render()
-        if step % 100 == 0:
-            print(f"[SuperMimic] playback step={step}")
 
 
 @torch.no_grad()
@@ -441,8 +439,6 @@ def run_velocity_playback(env: ManagerBasedRLEnv, actor: MultiEncoderAE, num_ste
         action = actor(build_actor_obs_td({"velocity": command.command}, history))
         observations, _, terminated, truncated, _ = env.step(action)
         history = advance_proprio_history(history, observations["actor"], terminated | truncated)
-        if step % 100 == 0:
-            print(f"[SuperMimic] playback step={step}")
         step += 1
 
 
