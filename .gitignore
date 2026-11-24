@@ -6,6 +6,7 @@
 *.py[cod]
 build/
 dist/
+/doc/
 
 logs/
 outputs/

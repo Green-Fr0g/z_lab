@@ -32,6 +32,7 @@ importers = ["isaaclab[importers]==3.0.0"]
 isaacsim = ["isaaclab[isaacsim]==3.0.0"]
 leapp = ["isaaclab[leapp]==3.0.0"]
 mimic = ["isaaclab[mimic]==3.0.0"]
+supermimic = ["z-lab-supermimic"]
 ov = ["isaaclab[ov]==3.0.0"]
 ovphysx = ["isaaclab[ovphysx]==3.0.0"]
 ovrtx = ["isaaclab[ovrtx]==3.0.0"]
@@ -87,6 +88,7 @@ override-dependencies = [
 "ovphysx" = { index = "pypi-public" }
 "ovrtx" = { index = "pypi-public" }
 "ovstage" = { index = "pypi-public" }
+"z-lab-supermimic" = { path = "src/supermimic", editable = true }
 "torch" = { index = "pytorch-cu130" }
 "torchaudio" = { index = "pytorch-cu130" }
 "torchvision" = { index = "pytorch-cu130" }

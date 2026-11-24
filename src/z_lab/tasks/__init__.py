@@ -13,4 +13,5 @@ from . import (
     amp,
     locomotion,
     mimic,
+    supermimic,
 )  # noqa: E402,F401

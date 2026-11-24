@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # z_lab 统一入口脚本。
-# -i/--install: 初始化 Git LFS、拉取大文件、创建 uv 虚拟环境并安装依赖和本地 rsl_rl
+# -i/--install: 初始化 Git LFS、拉取大文件并安装 rsl_rl、SuperMimic 和 Viser
 # --install-rsl-rl: 在项目虚拟环境中安装本地可编辑版 rsl_rl
 # -l/--list:    列出已注册任务
 # -t/--train:   使用 rsl_rl 运行训练
@@ -54,7 +54,7 @@ install_project() {
     fi
 
     echo "[信息] 同步项目依赖。"
-    uv sync --extra rsl-rl
+    uv sync --extra rsl-rl --extra supermimic --extra viser
     install_rsl_rl
     echo "[完成] z_lab 安装完成。"
 }
@@ -126,7 +126,7 @@ case "${1:-}" in
     -h|--help|"")
         cat <<'EOF'
 用法：
-  ./z_lab.sh -i                         初始化环境、拉取资产并安装本地 rsl_rl
+  ./z_lab.sh -i                         初始化环境、拉取资产并安装 rsl_rl、SuperMimic 和 Viser
   ./z_lab.sh --install-rsl-rl            单独安装本地可编辑版 rsl_rl
   ./z_lab.sh -l                         列出已注册训练任务
   ./z_lab.sh -t --task <任务名称>        使用 rsl_rl 训练

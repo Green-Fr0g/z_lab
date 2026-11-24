@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "z-lab-supermimic"
+version = "0.1.0"
+description = "SuperMimic world-model and policy training for z_lab tasks."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch>=2.11",
+    "tensordict>=0.7",
+    "rsl-rl-lib==5.5.1",
+    "usd-exchange>=3.0.1",
+    "onnx>=1.14",
+]
+
+[tool.setuptools]
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["supermimic*"]

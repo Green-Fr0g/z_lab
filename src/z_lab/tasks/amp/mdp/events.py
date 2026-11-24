@@ -144,8 +144,10 @@ class MotionResetManager:
         joint_vel = joint_vel[:, asset_cfg.joint_ids]
         limits = asset.data.soft_joint_pos_limits.torch[env_ids][:, asset_cfg.joint_ids]
         joint_pos = torch.maximum(torch.minimum(joint_pos, limits[..., 1]), limits[..., 0])
-        asset.write_root_pose_to_sim(torch.cat((root_pos, root_quat), dim=-1), env_ids=env_ids)
-        asset.write_root_velocity_to_sim(torch.cat((root_lin_vel, root_ang_vel), dim=-1), env_ids=env_ids)
+        asset.write_root_link_pose_to_sim_index(root_pose=torch.cat((root_pos, root_quat), dim=-1), env_ids=env_ids)
+        asset.write_root_link_velocity_to_sim_index(
+            root_velocity=torch.cat((root_lin_vel, root_ang_vel), dim=-1), env_ids=env_ids
+        )
         asset.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=asset_cfg.joint_ids, env_ids=env_ids)
 
 

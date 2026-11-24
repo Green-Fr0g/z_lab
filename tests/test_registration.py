@@ -2,6 +2,8 @@
 
 import gymnasium as gym
 
+from isaaclab_tasks.utils import load_cfg_from_registry
+
 import z_lab.tasks  # noqa: F401
 
 
@@ -24,3 +26,10 @@ def test_task_registrations():
 
     assert gym.spec("ZLab-AMP-Unitree-G1").kwargs["rsl_rl_cfg_entry_point"].endswith(":G1AMPRunnerCfg")
     assert gym.spec("ZLab-AMP-DR02").kwargs["rsl_rl_cfg_entry_point"].endswith(":DR02AMPRunnerCfg")
+
+
+def test_supermimic_tasks_load_distinct_state_observations():
+    gen = load_cfg_from_registry("ZLab-SuperMimic-GenCoord-G1", "env_cfg_entry_point")
+    maxcoord = load_cfg_from_registry("ZLab-SuperMimic-MaxCoord-G1", "env_cfg_entry_point")
+
+    assert gen.observations.full_state.state.func != maxcoord.observations.full_state.state.func

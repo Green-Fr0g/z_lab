@@ -1,105 +1,92 @@
 # z_lab
 
-这是一个基于 Isaac Lab 3.0 的下游任务包，使用标准的 uv `src` 项目布局。
+## 项目概览
 
-当前注册了三个基于管理器的速度跟踪 locomotion 任务和三个 AMP locomotion 任务：
+`z_lab` 是基于 Isaac Lab 3.0.0 的人形机器人强化学习项目，支持 Unitree G1（29 和 23 自由度）以及 DR02。任务覆盖速度跟踪、对抗式动作模仿、全身动作跟踪和基于世界模型的策略训练。
 
-- `ZLab-Velocity-Unitree-G1`：Unitree G1，29 个策略自由度。
-- `ZLab-Velocity-Unitree-G1-23DOF`：Unitree G1，23 个策略自由度。
-- `ZLab-Velocity-DR02`：DR02，29 个策略自由度。
-- `ZLab-AMP-Unitree-G1`：G1，29 个策略自由度。
-- `ZLab-AMP-Unitree-G1-23DOF`：G1，23 个策略自由度。
-- `ZLab-AMP-DR02`：DR02，29 个策略自由度。
+| 任务 | 用途 | 代表性任务 ID |
+| --- | --- | --- |
+| Velocity | 跟踪机身速度指令 | `ZLab-Velocity-Unitree-G1` |
+| AMP | 用参考动作约束行走风格 | `ZLab-AMP-Unitree-G1` |
+| Mimic | 跟踪全身参考动作 | `ZLab-Mimic-Unitree-G1` |
+| SuperMimic | 联合训练可微世界模型和多编码器策略 | `ZLab-SuperMimic-GenCoord-G1` |
 
-机器人资产使用 Isaac Lab 的隐式关节执行器。每个机器人的关节顺序、动作缩放、连杆名称、执行器参数和 USD 路径保存在 `src/z_lab/assets/robots` 中。
+运行 `./z_lab.sh -l --show_presets` 查看完整任务 ID 和物理后端预设。
 
-## 安装
+## 版本与安装
 
-先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 Git LFS，然后在项目根目录执行一键安装脚本：
+项目使用 Python **3.12** 和 Isaac Lab **3.0.0**。安装 uv 和 Git LFS 后，在仓库根目录运行以下命令。 [uv 安装指南](https://docs.astral.sh/uv/getting-started/installation/) · [Git LFS](https://git-lfs.com/)
 
 ```bash
 ./z_lab.sh -i
 ```
 
-该命令依次完成以下工作：
+脚本拉取 Git LFS 资产，创建 `.venv`，并按 `uv.lock` 安装 Isaac Lab、本地可编辑的 RSL-RL（含 AMP-PPO）和 SuperMimic，以及浏览器可视化所需的 Viser。Isaac Lab 从官方 Python 包安装。直接使用 `uv run` 或 `z_lab.sh` 即可进入项目环境。
 
-1. 初始化 Git LFS 并执行 `git lfs pull`，拉取 USD、模型和其他大文件。
-2. 使用 Python 3.12 创建项目的 `.venv` 虚拟环境。
-3. 执行 `uv sync --extra rsl-rl`，安装项目和 Isaac Lab 依赖。
-4. 将 `src/rsl_rl` 中的 RSL-RL 5.5.1 + AMP 以 editable 方式安装，并检查 AMP 算法入口。
+已有项目环境时，可用 `./z_lab.sh --install-rsl-rl` 单独重装本地 RSL-RL。
 
-已有项目环境时，可以单独安装本地 RSL-RL：
+### 选择物理后端
 
-```bash
-./z_lab.sh --install-rsl-rl
-```
-
-`pyproject.toml` 使用官方发布的 `isaaclab==3.0.0` 安装包，包含所需的 Isaac Lab 子模块。安装只需本项目，无需额外克隆 IsaacLab 仓库，也不依赖项目外的本地源码目录；首次安装需要联网下载 Python 依赖和 Git LFS 资产。依赖版本由 `uv.lock` 锁定。安装完成后不需要手动激活虚拟环境，脚本会通过 `uv run` 使用项目环境。
-
-项目会转发 Isaac Lab 提供的可选依赖，包括 Isaac Sim、物理后端、渲染、可视化、强化学习和开发工具等。根据使用场景选择相应的 extra，例如：
+默认后端是 Newton/MJWarp，可直接运行无界面仿真。也可以根据任务的预设选择 Isaac Sim PhysX 或 OvPhysX，并通过相应的 extra 安装运行时。
 
 ```bash
-# 使用 OV PhysX
-uv run --extra ovphysx isaaclab random_agent --task <任务名称> physics=ovphysx
+# Newton/MJWarp
+uv run isaaclab zero_agent --task ZLab-Velocity-Unitree-G1 --num_envs 4 --max_steps 100 --viz none
 
-# 使用 Isaac Sim PhysX 和 RTX 渲染
-uv run --extra isaacsim isaaclab random_agent --task <任务名称> physics=isaacsim_physx
+# Isaac Sim PhysX，使用 Kit 窗口
+uv run --extra isaacsim isaaclab zero_agent --task ZLab-Velocity-Unitree-G1 --num_envs 4 --max_steps 100 --viz kit physics=isaacsim_physx
 
-# 使用 Isaac Sim 和 Rerun 可视化
-uv run --extra isaacsim --extra rerun isaaclab random_agent --task <任务名称> --viz rerun
+# OvPhysX，无界面
+uv run --extra ovphysx isaaclab zero_agent --task ZLab-Velocity-Unitree-G1 --num_envs 4 --max_steps 100 --viz none physics=ovphysx
 ```
 
-## 运行任务
+## 训练与播放
 
-速度跟踪和 AMP 任务的 agent 配置均使用 RSL-RL。可以先查看已经注册的环境：
+### Velocity、AMP 和 Mimic
+
+这三类任务使用 RSL-RL。`./z_lab.sh -t` 和 `./z_lab.sh -p` 分别调用 Isaac Lab 的训练和播放入口。播放默认使用 Newton GL，可通过 `--viz` 选择其他可视化方式。
 
 ```bash
-uv run isaaclab list_envs --show_presets
+# 训练速度跟踪策略并播放最近的检查点
+./z_lab.sh -t --task ZLab-Velocity-Unitree-G1 --viz none
+./z_lab.sh -p --task ZLab-Velocity-Unitree-G1 --checkpoint latest
+
+# 使用任务自带的参考动作训练 AMP 或 Mimic
+./z_lab.sh -t --task ZLab-AMP-Unitree-G1 --viz none
+./z_lab.sh -t --task ZLab-Mimic-Unitree-G1 --viz none
 ```
 
-将 `<任务名称>` 替换为上面列出的任务 ID：
+AMP 的参考动作目录由 agent 配置中的 `amp_motion_files` 指定。Mimic 可以通过 `env.commands.motion.motion_file=/path/to/motion.npz` 指定参考动作。播放时也可将 `--checkpoint latest` 换成具体的检查点路径。
 
-也可以使用项目入口脚本。训练默认使用 `rsl_rl`，脚本会自动传递 `--rl_library rsl_rl`；如需使用其他强化学习库，可以在命令中显式传入 `--rl_library`。训练和播放参数遵循 Isaac Lab 3.0 接口，不再使用旧版的 `--headless` 参数：
+### SuperMimic
+
+SuperMimic 使用独立的训练和播放脚本。每种机器人都有 GenCoord 和 MaxCoord 任务。GenCoord 用根连杆和关节状态描述机器人，MaxCoord 用跟踪连杆的位姿和速度描述机器人。
 
 ```bash
-# 列出已注册任务
-./z_lab.sh -l
+# 训练世界模型和策略
+uv run --extra supermimic python scripts/supermimic/train.py --task ZLab-SuperMimic-GenCoord-G1 --viz none
 
-# 使用 rsl_rl 训练
-./z_lab.sh -t --task ZLab-Velocity-Unitree-G1
-
-# 训练 AMP locomotion 策略
-uv run isaaclab train --rl_library rsl_rl --task ZLab-AMP-Unitree-G1 --num_envs 256
-uv run isaaclab train --rl_library rsl_rl --task ZLab-AMP-DR02 --num_envs 256
-
-# 播放策略
-./z_lab.sh -p --task ZLab-Velocity-Unitree-G1 --checkpoint <检查点路径>
+# 在浏览器中播放参考动作跟踪策略
+uv run --extra supermimic --extra viser python scripts/supermimic/play.py --task ZLab-SuperMimic-GenCoord-G1 --checkpoint latest --viz viser
 ```
 
-`-l`、`-t` 和 `-p` 后面的参数会传递给 Isaac Lab 3.0 对应入口。使用 `./z_lab.sh --help` 查看脚本帮助。
+训练会保存 `model_<iteration>.pt` 和 `world_model.pt`。用 `--checkpoint` 加载完整检查点并继续训练，或用 `--world-model-checkpoint` 初始化世界模型并从第 0 轮训练新策略。两种参数均接受文件路径或 `latest`，每次训练选择其中一种。
+
+播放默认使用 Motion encoder，播放当前参考片段，并显示蓝色参考动作影子和橙色单步世界模型预测。使用 `--task-encoder velocity` 可切换到速度控制，使用 `--velocity-command 0.3 0 0` 可指定固定的前向速度、侧向速度和偏航角速度。两种模式均可用 `--num-steps` 限制播放步数。
+
+### 多 GPU、基准测试和日志
 
 ```bash
-# 使用零动作运行
-uv run isaaclab zero_agent --task <任务名称> --num_envs 16
+# 使用 RSL-RL 在两张 GPU 上训练
+uv run isaaclab train_multigpu --rl_library rsl_rl --task ZLab-Velocity-Unitree-G1 --num_gpus 2
 
-# 使用随机动作运行
-uv run isaaclab random_agent --task <任务名称> --num_envs 16
+# 测量仿真吞吐和训练耗时
+uv run isaaclab benchmark runtime --task ZLab-Velocity-Unitree-G1 --num_envs 16 --num_steps 1000
+uv run isaaclab benchmark training --rl_library rsl_rl --task ZLab-Velocity-Unitree-G1 --max_iterations 10
 
-# 训练
-uv run isaaclab train --rl_library rsl_rl --task <任务名称>
-
-# 加载最新检查点进行测试
-uv run isaaclab play --rl_library rsl_rl --task <任务名称> --checkpoint latest
-
-# 多 GPU 训练
-uv run isaaclab train_multigpu --rl_library rsl_rl --task <任务名称> --num_gpus 2
-
-# 运行基准测试
-uv run isaaclab benchmark runtime --task <任务名称> --num_envs 16 --num_steps 1000
-uv run isaaclab benchmark training --rl_library rsl_rl --task <任务名称> --max_iterations 10
+# 查看训练曲线
+uv run tensorboard --logdir logs
 ```
-
-可以使用 `physics=<预设名称>` 选择 `isaaclab list_envs --show_presets` 输出的物理后端预设。
 
 ## 项目结构
 
@@ -137,44 +124,13 @@ robot_usd_path = Z_LAB_ASSETS_DIR / "models" / "g1" / "g1_29dof_rev_1_0.usd"
 
 需要传入字符串的配置字段应使用 `str(robot_usd_path)`。项目的 `.gitattributes` 已为 USD 等大文件配置 Git LFS；添加大型二进制资产前请先安装 Git LFS。
 
-### USD 和 Git LFS 说明
+## 致谢
 
-G1 29DOF 和 G1 23DOF 的顶层 USD 是 USD 组合层，文件本身很小，通过组合关系引用 `configuration` 目录中的 base、physics 和 sensor 层。只要 Git LFS 资源已完整拉取，两个模型可以正常打开，顶层文件较小不代表模型不完整。
+感谢以下开源项目的作者、维护者和贡献者。`z_lab` 的仿真环境、训练算法和可视化得益于他们的工作。
 
-DR02 的主体、关节、物理和碰撞层可以正常加载。原始 `DR02-pro_base.usd` 中 6 个传感器连杆的视觉引用指向不存在的几何模型，现已清除这些失效视觉引用；`d435_front_link`、`d435_head_link`、`d435_rear_link`、`imu_base_link`、`imu_head_link` 和 `lidar_link` 连杆及其传感器/碰撞结构仍然保留。若远程仓库中看到 USD 文件只有 `version`、`oid` 和 `size` 三行，这是 Git LFS 指针文件，应在项目根目录执行：
-
-```bash
-git lfs install
-git lfs pull
-```
-
-之后再运行 `./z_lab.sh -i` 同步 Python 环境。
-
-## 开发与检查
-
-运行注册测试和代码质量检查：
-
-```bash
-uv run pytest
-uv run pre-commit run --all-files
-```
-
-VS Code/Pylance 或 Cursor/basedpyright 应使用项目的 `.venv` 解释器。需要根据已安装的依赖生成编辑器配置时运行：
-
-```bash
-uv run isaaclab --editor
-```
-
-如果使用 Isaac Sim extra，配置编辑器时也需要带上对应 extra：
-
-```bash
-uv run --extra isaacsim isaaclab --editor
-```
-
-如果 Isaac Sim 是独立安装而不在项目环境中，可以显式指定路径：
-
-```bash
-uv run isaaclab --editor --isaac_path <isaac-sim路径>
-```
-
-如果编辑器无法解析模块，请确认编辑器选择的 Python 解释器与执行 setup 命令时使用的解释器一致，然后重新加载窗口。
+- Isaac Lab 提供了任务配置、仿真接口和强化学习工作流。 [Isaac Lab 仓库](https://github.com/isaac-sim/IsaacLab)
+- SuperMimic 提供了可微世界模型和多编码器策略的训练框架。本项目将其从 mjlab 迁移到了 Isaac Lab。 [SuperMimic 仓库](https://github.com/HybridRobotics/supermimic) · [mjlab 仓库](https://github.com/mujocolab/mjlab)
+- RSL-RL 提供了策略训练框架。 [RSL-RL 仓库](https://github.com/leggedrobotics/rsl_rl)
+- 感谢 unitree_rl_lab、unitree_rl_mjlab 和 robot_lab 开源了机器人运动控制任务和训练实现。 [unitree_rl_lab 仓库](https://github.com/unitreerobotics/unitree_rl_lab) · [unitree_rl_mjlab 仓库](https://github.com/unitreerobotics/unitree_rl_mjlab) · [robot_lab 仓库](https://github.com/fan-ziqi/robot_lab)
+- AMP_mjlab 为本项目的 AMP 观测、奖励和训练配置提供了参考。 [AMP_mjlab 仓库](https://github.com/ccrpRepo/AMP_mjlab)
+- Newton 提供了物理仿真后端，Viser 提供了浏览器中的策略回放可视化。 [Newton 仓库](https://github.com/newton-physics/newton) · [Viser 仓库](https://github.com/viser-project/viser)
