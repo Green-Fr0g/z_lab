@@ -1,17 +1,22 @@
 """Bind the G1 23-DOF asset, state order, expert motions, and reward weights."""
 
+from pathlib import Path
+
 from isaaclab.utils import configclass
 
 from z_lab.assets.robots.g1_23 import (
     G1_23DOF_ACTION_SCALE,
+    G1_23DOF_AMP_LINK_NAMES,
     G1_23DOF_ANCHOR_LINK_NAME,
     G1_23DOF_CFG,
     G1_23DOF_DOF_ORDER,
     G1_23DOF_MIMIC_LINK_NAMES,
     G1_23DOF_ROOT_LINK_NAME,
 )
-from z_lab.tasks.amp.config.g1_23.amp_env_cfg import MOTION_DIR, RECOVERY_CLIP_NAME
+from z_lab.tasks.amp.config.g1_23.amp_env_cfg import RECOVERY_CLIP_NAME
 from z_lab.tasks.superamp.superamp_env_cfg import MaxCoordStateCfg, ObservationsCfg, SuperAmpGenCoordEnvCfg
+
+MOTION_DIR = Path(__file__).resolve().parent / "motions"
 
 
 @configclass
@@ -19,14 +24,12 @@ class G1_23DOFSuperAmpGenCoordEnvCfg(SuperAmpGenCoordEnvCfg):
     """G1 23-DOF velocity tracking with generalized-coordinate observations."""
 
     joint_names = G1_23DOF_DOF_ORDER
+    amp_body_names = G1_23DOF_AMP_LINK_NAMES
     full_state_body_names = G1_23DOF_MIMIC_LINK_NAMES
     anchor_link_name = G1_23DOF_ANCHOR_LINK_NAME
     root_link_name = G1_23DOF_ROOT_LINK_NAME
     foot_links = ["left_ankle_roll_link", "right_ankle_roll_link"]
     amp_action_scale = G1_23DOF_ACTION_SCALE
-
-    # The bundled AMP clips were exported with center-of-mass linear velocities.
-    expert_linear_velocity_at_com: bool = True
 
     def __post_init__(self) -> None:
         super().__post_init__()

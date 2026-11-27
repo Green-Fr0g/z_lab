@@ -65,21 +65,21 @@ class EventsCfg(SuperMimicEventsCfg):
             "exclude_motion_names": (),
         },
     )
-    push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
-        mode="interval",
-        interval_range_s=(1.0, 3.0),
-        params={
-            "velocity_range": {
-                "x": (-1.0, 1.0),
-                "y": (-0.5, 0.5),
-                "z": (-0.4, 0.4),
-                "roll": (-0.52, 0.52),
-                "pitch": (-0.52, 0.52),
-                "yaw": (-0.78, 0.78),
-            }
-        },
-    )
+    # push_robot = EventTerm(
+    #     func=mdp.push_by_setting_velocity,
+    #     mode="interval",
+    #     interval_range_s=(1.0, 3.0),
+    #     params={
+    #         "velocity_range": {
+    #             "x": (-1.0, 1.0),
+    #             "y": (-0.5, 0.5),
+    #             "z": (-0.4, 0.4),
+    #             "roll": (-0.52, 0.52),
+    #             "pitch": (-0.52, 0.52),
+    #             "yaw": (-0.78, 0.78),
+    #         }
+    #     },
+    # )
 
 
 @configclass
@@ -204,8 +204,6 @@ class SuperAmpGenCoordEnvCfg(ManagerBasedRLEnvCfg):
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
-    expert_linear_velocity_at_com: bool = False
-    """Whether the expert NPZ stores the linear velocity at each body's center of mass."""
 
     def __post_init__(self) -> None:
         self.compute_final_obs = True

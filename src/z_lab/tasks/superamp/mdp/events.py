@@ -30,11 +30,6 @@ class ResetFromExpertMotion(ManagerTermBase):
             raise FileNotFoundError(f"No eligible expert motion NPZ files at {motion_file}")
 
         root_name = cfg.params["root_name"]
-        self._write_root_velocity = (
-            self._robot.write_root_com_velocity_to_sim_index
-            if env.cfg.expert_linear_velocity_at_com
-            else self._robot.write_root_link_velocity_to_sim_index
-        )
         self._joint_count = len(self._robot.joint_names)
         clips = []
         for path in paths:
@@ -87,6 +82,6 @@ class ResetFromExpertMotion(ManagerTermBase):
         pose, twist, joint_pos, joint_vel = frames.split((7, 6, self._joint_count, self._joint_count), dim=-1)
         lower, upper = self._robot.data.soft_joint_pos_limits.torch[env_ids].unbind(dim=-1)
         self._robot.write_root_link_pose_to_sim_index(root_pose=pose.contiguous(), env_ids=env_ids)
-        self._write_root_velocity(root_velocity=twist.contiguous(), env_ids=env_ids)
+        self._robot.write_root_link_velocity_to_sim_index(root_velocity=twist.contiguous(), env_ids=env_ids)
         self._robot.write_joint_position_to_sim_index(position=joint_pos.clamp(lower, upper), env_ids=env_ids)
         self._robot.write_joint_velocity_to_sim_index(velocity=joint_vel.contiguous(), env_ids=env_ids)

@@ -5664,6 +5664,9 @@ sb3 = [
 skrl = [
     { name = "isaaclab", extra = ["skrl"] },
 ]
+superamp = [
+    { name = "z-lab-superamp" },
+]
 supermimic = [
     { name = "z-lab-supermimic" },
 ]
@@ -5726,9 +5729,10 @@ requires-dist = [
     { name = "rl-games", marker = "extra == 'rl-games'", git = "https://github.com/isaac-sim/rl_games.git?rev=5cf4f9ff07e9a01bbefd167cf19b6804b294b51c" },
     { name = "rsl-rl-lib", editable = "src/rsl_rl" },
     { name = "standard-distutils", marker = "extra == 'rl-games'" },
+    { name = "z-lab-superamp", marker = "extra == 'superamp'", editable = "src/superamp" },
     { name = "z-lab-supermimic", marker = "extra == 'supermimic'", editable = "src/supermimic" },
 ]
-provides-extras = ["all", "dev", "importers", "isaacsim", "leapp", "mimic", "supermimic", "ov", "ovphysx", "ovrtx", "rerun", "rl-games", "rlinf", "rsl-rl", "sb3", "skrl", "teleop", "test", "tetrahedralization", "torchrl", "video", "viser", "wandb"]
+provides-extras = ["all", "dev", "importers", "isaacsim", "leapp", "mimic", "superamp", "supermimic", "ov", "ovphysx", "ovrtx", "rerun", "rl-games", "rlinf", "rsl-rl", "sb3", "skrl", "teleop", "test", "tetrahedralization", "torchrl", "video", "viser", "wandb"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -5736,6 +5740,33 @@ dev = [
     { name = "pre-commit", specifier = ">=4.2" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "ruff", specifier = ">=0.11" },
+]
+
+[[package]]
+name = "z-lab-superamp"
+version = "0.1.0"
+source = { editable = "src/superamp" }
+dependencies = [
+    { name = "isaaclab" },
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "rsl-rl-lib" },
+    { name = "tensorboard" },
+    { name = "tensordict" },
+    { name = "torch" },
+    { name = "usd-exchange" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "isaaclab", specifier = "==3.0.0" },
+    { name = "numpy" },
+    { name = "onnx", specifier = ">=1.14" },
+    { name = "rsl-rl-lib", specifier = "==5.5.1" },
+    { name = "tensorboard" },
+    { name = "tensordict", specifier = ">=0.7" },
+    { name = "torch", specifier = ">=2.11" },
+    { name = "usd-exchange", specifier = ">=3.0.1" },
 ]
 
 [[package]]
