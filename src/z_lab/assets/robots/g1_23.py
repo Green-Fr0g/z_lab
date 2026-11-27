@@ -11,10 +11,11 @@ from isaaclab_physx.sim.schemas import PhysxArticulationCfg, PhysxRigidBodyCfg
 from z_lab.assets import Z_LAB_ASSETS_DIR
 
 G1_23DOF_USD_PATH = Z_LAB_ASSETS_DIR / "models" / "g1_23" / "g1_23dof_rev_1_0.usd"
+G1_23DOF_PARKOUR_USD_PATH = Z_LAB_ASSETS_DIR / "models" / "g1_23" / "g1_23dof_rev_1_0_mjlab_feet.usda"
 
 G1_23DOF_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=str(G1_23DOF_USD_PATH),
+        usd_path=str(G1_23DOF_PARKOUR_USD_PATH),
         fix_root_link=False,
         activate_contact_sensors=True,
         rigid_props=PhysxRigidBodyCfg(

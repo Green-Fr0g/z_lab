@@ -20,10 +20,12 @@ from z_lab.assets import Z_LAB_ASSETS_DIR
 # ---------------------------------------------------------------------------
 # DR02 (DR02-Pro)
 # ---------------------------------------------------------------------------
+DR02_USD_PATH = Z_LAB_ASSETS_DIR / "models" / "dr02" / "DR02-pro.usd"
+DR02_PARKOUR_USD_PATH = Z_LAB_ASSETS_DIR / "models" / "dr02" / "DR02-pro_hip_collision_filter.usda"
 
 DR02_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=str(Z_LAB_ASSETS_DIR / "models" / "dr02" / "DR02-pro.usd"),
+        usd_path=str(DR02_PARKOUR_USD_PATH),
         fix_root_link=False,
         activate_contact_sensors=True,
         rigid_props=PhysxRigidBodyCfg(
