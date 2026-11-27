@@ -238,6 +238,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         update_ratio = self.adapter.num_envs * cfg.replay_ratio / model_batch_count
         self._updates_per_step = Ratio(update_ratio)
         self._iteration = -1
+        self._logger_state: dict = {}
 
     def _build_sim_obs_td(
         self,
@@ -308,12 +309,11 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         if self.adapter.device.type == "cuda":
             torch.cuda.synchronize(self.adapter.device)
 
-    def _train_updates(self, iteration: int) -> tuple[dict[str, torch.Tensor], float, float]:
-        losses: dict[str, torch.Tensor] = {}
+    def _train_updates(self, iteration: int, logger: TrainingLogger) -> tuple[float, float]:
         updates = self._updates_per_step(iteration)
         min_sequence = max(self.cfg.world_model.horizon, 2)
         if self.replay_buffer.num_transitions < min_sequence:
-            return losses, 0.0, 0.0
+            return 0.0, 0.0
         world_model_time = policy_time = 0.0
         for _ in range(updates):
             start = time.perf_counter()
@@ -321,14 +321,14 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                 self.replay_buffer.sample(self.cfg.world_model.horizon, self.cfg.world_model.batch_size)
                 for _ in range(self.cfg.world_model.num_batches)
             ]
-            losses.update(self.world_model_learner.update(sequences))
+            logger.process_update(self.world_model_learner.update(sequences))
             self._synchronize_cuda()
             policy_start = time.perf_counter()
             world_model_time += policy_start - start
-            losses.update(self.policy_learner.update())
+            logger.process_update(self.policy_learner.update())
             self._synchronize_cuda()
             policy_time += time.perf_counter() - policy_start
-        return losses, world_model_time, policy_time
+        return world_model_time, policy_time
 
     def _update_return_sampler(
         self,
@@ -357,24 +357,20 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         from torch.utils.tensorboard import SummaryWriter
 
         log_dir.mkdir(parents=True, exist_ok=True)
-        losses: dict[str, torch.Tensor] = {}
         start_iteration = self._iteration + 1
         end_iteration = start_iteration + self.cfg.max_iterations
         collect_time = world_model_time = policy_time = 0.0
         with SummaryWriter(log_dir=str(log_dir), flush_secs=10) as writer:
-            total_log_iterations = max(
-                (self.cfg.max_iterations + self.cfg.log_interval - 1) // self.cfg.log_interval, 1
-            )
             logger = TrainingLogger(
                 writer,
                 log_dir.name,
                 (infos or {}).get("task"),
                 self.adapter.num_envs,
-                self.env.max_episode_length,
                 self.adapter.device,
+                start_iteration,
+                self._logger_state,
             )
             num_collected_steps = 0
-            log_count = 0
             self._synchronize_cuda()
             for iteration in range(start_iteration, end_iteration):
                 start = time.perf_counter()
@@ -382,8 +378,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                 self._synchronize_cuda()
                 num_collected_steps += self.adapter.num_envs
                 collect_time += time.perf_counter() - start
-                metrics, model_update_time, policy_update_time = self._train_updates(iteration)
-                losses.update(metrics)
+                model_update_time, policy_update_time = self._train_updates(iteration, logger)
                 world_model_time += model_update_time
                 policy_time += policy_update_time
 
@@ -391,18 +386,17 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                 final_iteration = iteration + 1 == end_iteration
                 if iteration % self.cfg.log_interval == 0 or final_iteration:
                     logger.log(
-                        iteration=log_count,
-                        total_iterations=total_log_iterations,
+                        iteration=iteration,
+                        total_iterations=end_iteration,
                         collect_time=collect_time,
                         world_model_time=world_model_time,
                         policy_time=policy_time,
-                        losses=losses,
                         num_collected_steps=num_collected_steps,
                     )
-                    log_count += 1
                     collect_time = world_model_time = policy_time = 0.0
                     num_collected_steps = 0
                 if iteration % self.cfg.save_interval == 0 or final_iteration:
+                    self._logger_state = logger.state_dict()
                     self.save(log_dir / f"model_{iteration}.pt", infos)
                     _save_checkpoint(log_dir / "world_model.pt", self._world_model_checkpoint())
         return log_dir
@@ -423,6 +417,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
         checkpoint = {
             **self._world_model_checkpoint(),
             "infos": infos,
+            "logger": self._logger_state,
             "config": {
                 **asdict(self.cfg),
                 "num_goal_frames": self.num_goal_frames,
@@ -491,6 +486,7 @@ class SuperMimicRunner(BaseRunner[SuperMimicRunnerCfg]):
                 self.policy_learner.critic_optimizers, checkpoint["critic_optimizers"], strict=True
             ):
                 optimizer.load_state_dict(state)
+        self._logger_state = checkpoint.get("logger", {})
         self._iteration = checkpoint["iter"] if "iter" in checkpoint else checkpoint["iteration"]
 
     def train(self, log_dir: Path, infos: dict | None = None) -> Path:
