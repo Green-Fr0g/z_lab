@@ -163,7 +163,7 @@ class SuperAmpRunner:
             sim_context_dim=self._wm.sim_context_dim,
             soft_joint_pos_limits=self.adapter.soft_joint_pos_limits(),
             reward_weights=self.adapter.reward_weights(),
-            reward_stds=self.adapter.reward_stds(),
+            reward_params=self.adapter.reward_params(),
             orientation_limit=self.env.cfg.terminations.bad_orientation.params["limit_angle"],
             history_length=cfg.history_length,
         )

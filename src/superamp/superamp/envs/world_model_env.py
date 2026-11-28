@@ -69,7 +69,7 @@ class WorldModelEnv(WorldModelRollout):
         sim_context_dim: int,
         soft_joint_pos_limits: torch.Tensor,
         reward_weights: dict[str, float],
-        reward_stds: dict[str, float],
+        reward_params: dict[str, dict],
         orientation_limit: float,
         termination_softness: float = 0.05,
         *,
@@ -91,7 +91,7 @@ class WorldModelEnv(WorldModelRollout):
         self.sim_context_dim = sim_context_dim
         self.soft_joint_pos_limits = soft_joint_pos_limits
         self.reward_weights = reward_weights
-        self.reward_stds = reward_stds
+        self.reward_params = reward_params
         self.orientation_cosine = math.cos(orientation_limit)
         self.termination_softness = termination_softness
         amp_cfg = discriminator.cfg
@@ -237,12 +237,19 @@ class WorldModelEnv(WorldModelRollout):
         ang_w = angular[:, anchor, :]
         ang_b = (rotations[:, anchor].transpose(-1, -2) @ ang_w.unsqueeze(-1)).squeeze(-1)
         ang_error = (ang_w[:, 2] - goal[:, 2]).square() + ang_b[:, :2].square().sum(-1)
-        joints = joint_state[:, : self.representation.num_joints]
+        body = self.reward_params["body_ang_vel_xy_l2"]["body_index"]
+        body_ang_vel_b = (rotations[:, body].transpose(-1, -2) @ angular[:, body].unsqueeze(-1)).squeeze(-1)
+        ang_xy_error = body_ang_vel_b[:, :2].square().sum(-1)
+        joints, joint_vel = joint_state.split(self.representation.num_joints, dim=-1)
+        prev_joint_vel = self.joint_state[:, self.representation.num_joints :]
+        joint_acc = (joint_vel - prev_joint_vel) / self.representation.dt
         lower, upper = self.soft_joint_pos_limits.unbind(-1)
         joint_error = ((lower - joints).clamp_min(0.0) + (joints - upper).clamp_min(0.0)).sum(-1)
         terms = {
-            "track_lin_vel_xy": torch.exp(-lin_error / self.reward_stds["track_lin_vel_xy"] ** 2),
-            "track_ang_vel_z": torch.exp(-ang_error / self.reward_stds["track_ang_vel_z"] ** 2),
+            "track_lin_vel_xy": torch.exp(-lin_error / self.reward_params["track_lin_vel_xy"]["std"] ** 2),
+            "track_ang_vel_z": torch.exp(-ang_error / self.reward_params["track_ang_vel_z"]["std"] ** 2),
+            "body_ang_vel_xy_l2": torch.exp(-ang_xy_error / self.reward_params["body_ang_vel_xy_l2"]["std"] ** 2),
+            "joint_acc_l2": joint_acc.square().sum(-1),
             "action_rate_l2": (action - self.last_action).square().sum(-1),
             "joint_pos_limits": joint_error,
         }

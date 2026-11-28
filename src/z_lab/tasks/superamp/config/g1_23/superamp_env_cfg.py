@@ -60,13 +60,19 @@ class G1_23DOFSuperAmpGenCoordEnvCfg(SuperAmpGenCoordEnvCfg):
         self.rewards.track_lin_vel_xy.weight = 1.0
         self.rewards.track_ang_vel_z.weight = 1.0
 
+        # root stabilization
+        self.rewards.body_ang_vel_xy_l2.weight = 0.5
+
         # joint related
+        self.rewards.joint_acc_l2.weight = -2.5e-7
         self.rewards.joint_pos_limits.weight = -10.0
         self.rewards.action_rate_l2.weight = -0.01
 
         # ------------------------------params------------------------------
         self.rewards.track_lin_vel_xy.params["anchor_cfg"].body_names = [self.anchor_link_name]
         self.rewards.track_ang_vel_z.params["anchor_cfg"].body_names = [self.anchor_link_name]
+        self.rewards.body_ang_vel_xy_l2.params["body_cfg"].body_names = [self.root_link_name]
+        self.rewards.body_ang_vel_xy_l2.params["std"] = 3.14
         self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.joint_names
 
         # ------------------------------events------------------------------

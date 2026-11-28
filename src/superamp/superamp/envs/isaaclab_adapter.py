@@ -13,7 +13,7 @@ from superamp.storage import ExpertTransitions
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-_TRACKING_REWARD_NAMES = ("track_lin_vel_xy", "track_ang_vel_z")
+_EXP_REWARD_NAMES = ("track_lin_vel_xy", "track_ang_vel_z", "body_ang_vel_xy_l2")
 
 
 class IsaacLabSuperAmpAdapter:
@@ -154,13 +154,17 @@ class IsaacLabSuperAmpAdapter:
     def reward_weights(self) -> dict[str, float]:
         """Return task-configured tracking and regularization weights."""
         manager = self.env.reward_manager
-        names = (*_TRACKING_REWARD_NAMES, "action_rate_l2", "joint_pos_limits")
+        names = (*_EXP_REWARD_NAMES, "joint_acc_l2", "action_rate_l2", "joint_pos_limits")
         return {name: float(manager.get_term_cfg(name).weight) for name in names}
 
-    def reward_stds(self) -> dict[str, float]:
-        """Return the tracking reward standard deviations."""
+    def reward_params(self) -> dict[str, dict]:
+        """Resolve task reward parameters in world-model body order."""
         manager = self.env.reward_manager
-        return {name: float(manager.get_term_cfg(name).params["std"]) for name in _TRACKING_REWARD_NAMES}
+        params = {name: {"std": float(manager.get_term_cfg(name).params["std"])} for name in _EXP_REWARD_NAMES}
+        body_cfg = manager.get_term_cfg("body_ang_vel_xy_l2").params["body_cfg"]
+        body_name = self.robot.body_names[body_cfg.body_ids[0]]
+        params["body_ang_vel_xy_l2"]["body_index"] = self.env.cfg.full_state_body_names.index(body_name)
+        return params
 
     def expert_transitions(self, *, num_frames: int = 2, frame_stride: int = 1) -> ExpertTransitions:
         """Load discriminator examples using the task's expert paths and AMP link order."""

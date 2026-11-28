@@ -5,6 +5,7 @@ from isaaclab.envs.mdp import (
     bad_orientation,
     base_ang_vel,
     generated_commands,
+    joint_acc_l2,
     joint_pos_limits,
     joint_vel_rel,
     last_action,
@@ -13,7 +14,7 @@ from isaaclab.envs.mdp import (
     time_out,
 )
 
-from z_lab.tasks.amp.mdp.rewards import track_anchor_angular_velocity
+from z_lab.tasks.amp.mdp.rewards import body_ang_vel_xy_l2, track_anchor_angular_velocity
 from z_lab.tasks.supermimic.mdp.actions import BiasedJointPositionActionCfg
 from z_lab.tasks.supermimic.mdp.events import randomize_encoder_bias, randomize_foot_friction, randomize_torso_com
 from z_lab.tasks.supermimic.mdp.observations import biased_joint_pos_rel

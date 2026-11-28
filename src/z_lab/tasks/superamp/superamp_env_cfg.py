@@ -165,6 +165,12 @@ class RewardsCfg:
         weight=0.0,
         params={"std": 1.0, "command_name": "base_velocity", "anchor_cfg": SceneEntityCfg("robot")},
     )
+    body_ang_vel_xy_l2 = RewTerm(
+        func=mdp.body_ang_vel_xy_l2,
+        weight=0.0,
+        params={"std": 1.0, "body_cfg": SceneEntityCfg("robot")},
+    )
+    joint_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=0.0)
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=0.0)
     joint_pos_limits = RewTerm(
         func=mdp.joint_pos_limits,
