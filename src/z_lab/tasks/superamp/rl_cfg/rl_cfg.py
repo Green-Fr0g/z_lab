@@ -51,13 +51,15 @@ class SuperAmpDiscriminatorCfg:
     """Discriminator optimization and AMP sampling window."""
 
     hidden_dims: tuple[int, ...] = (1024, 512, 256)
-    learning_rate: float = 2e-4
-    batch_size: int = 2048
-    num_batches: int = 1
+    learning_rate: float = 1e-3
+    num_steps_per_env: int = 24
+    num_learning_epochs: int = 5
+    num_mini_batches: int = 4
     gradient_penalty: float = 10.0
     trunk_weight_decay: float = 1e-3
     head_weight_decay: float = 0.1
     reward_coef: float = 0.1
+    task_coef: float = 0.75
     num_frames: int = 2
     frame_stride: int = 1
 

@@ -105,6 +105,11 @@ class SuperAmpRunner:
         self._seed_sim_history()
         samples_per_update = cfg.world_model.num_batches * cfg.world_model.batch_size * cfg.world_model.horizon
         self._updates_per_step = self.adapter.num_envs * cfg.replay_ratio / samples_per_update
+        amp_cfg = cfg.discriminator
+        self._amp_batch_size = self.adapter.num_envs * amp_cfg.num_steps_per_env // amp_cfg.num_mini_batches
+        if self._amp_batch_size < 1:
+            raise ValueError("Discriminator minibatches must contain at least one window")
+        self._amp_update_credit = 0
         self._update_credit = 0.0
         self._iteration = -1
         self._logger_state: dict = {}
@@ -264,6 +269,8 @@ class SuperAmpRunner:
             max(cfg.warmup_steps, cfg.world_model.horizon), cfg.replay_buffer_size
         ):
             return 0.0, 0.0
+        # Spread the PPO discriminator budget over model updates as simulator steps arrive.
+        self._amp_update_credit += cfg.discriminator.num_learning_epochs * cfg.discriminator.num_mini_batches
         self._update_credit += self._updates_per_step
         updates = int(self._update_credit)
         self._update_credit -= updates
@@ -289,7 +296,10 @@ class SuperAmpRunner:
     def _update_policy(self) -> dict[str, torch.Tensor]:
         if not self.amp_replay.size:
             return {}
-        losses = self.discriminator_learner.update(self.expert, self.amp_replay)
+        num_batches, self._amp_update_credit = divmod(self._amp_update_credit, self.cfg.discriminator.num_steps_per_env)
+        losses = {}
+        if num_batches:
+            losses = self.discriminator_learner.update(self.expert, self.amp_replay, self._amp_batch_size, num_batches)
         losses.update(self.policy_learner.update())
         return losses
 

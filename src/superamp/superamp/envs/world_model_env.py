@@ -97,9 +97,9 @@ class WorldModelEnv(WorldModelRollout):
         amp_cfg = discriminator.cfg
         self.amp_history_length = (amp_cfg.num_frames - 1) * amp_cfg.frame_stride
         self._start_history_length = max(self.history_length, self.amp_history_length)
-        self.max_step_reward = representation.dt * (
-            sum(max(weight, 0.0) for weight in reward_weights.values()) + amp_cfg.reward_coef
-        )
+        self.task_coef = amp_cfg.task_coef
+        max_task_reward = representation.dt * sum(max(weight, 0.0) for weight in reward_weights.values())
+        self.max_step_reward = self.task_coef * max_task_reward + (1.0 - self.task_coef) * amp_cfg.reward_coef
 
     def get_observations(self) -> TensorDict:
         """Build observations for the velocity actor and optional critic."""
@@ -178,7 +178,7 @@ class WorldModelEnv(WorldModelRollout):
         next_amp = self.amp_features.from_bodies(*bodies)
         amp_window = torch.cat((self.amp_history, next_amp.unsqueeze(1)), dim=1)
         amp_reward = self.discriminator.reward(amp_window[:, :: self.discriminator.cfg.frame_stride])
-        reward = task_reward + self.representation.dt * amp_reward
+        reward = self.task_coef * task_reward + (1.0 - self.task_coef) * amp_reward
         termination = self._compute_term_prob(next_aux)
         self.last_amp_window = amp_window
         self.amp_history = amp_window[:, 1:]
